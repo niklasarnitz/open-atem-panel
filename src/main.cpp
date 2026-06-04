@@ -25,10 +25,11 @@ constexpr uint32_t kAtemTimeoutMs = 5000;
 constexpr uint32_t kAtemConnectRetryIntervalMs = 2000;
 
 // Network configuration parameters
-const IPAddress kLocalIp(192, 168, 10, 240);
-const IPAddress kGateway(192, 168, 10, 1);
+const IPAddress kLocalIp(192, 168, 178, 246);
+const IPAddress kGateway(192, 168, 178, 1);
 const IPAddress kSubnet(255, 255, 255, 0);
-const IPAddress kSwitcherIp(192, 168, 10, 245);
+const IPAddress kSwitcherIp(192, 168, 178, 240);
+
 constexpr uint16_t kSwitcherPort = 9910;
 constexpr uint16_t kLocalPort = 50991;
 
