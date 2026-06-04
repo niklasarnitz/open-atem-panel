@@ -60,10 +60,10 @@ constexpr uint8_t kColBoardPins[] = {37, 38, 39, 40, 41, 42, 43, 44, 45};
 constexpr size_t kRowCount = sizeof(kMcpRowPins) / sizeof(kMcpRowPins[0]);
 constexpr size_t kColCount = sizeof(kMcpColPins) / sizeof(kMcpColPins[0]);
 
-// TLC5955 Pins
-constexpr uint8_t kPinSin = 33;
-constexpr uint8_t kPinSclk = 34; // Pin 4 not available on Waveshare board, changed to IO34 (safe pin)
-constexpr uint8_t kPinLat = 36;  // Pin 5 not available on Waveshare board, changed to IO36 (safe pin)
+// TLC5955 Pins (GPIO 33, 34, 36 are reserved for Octal PSRAM on ESP32-S3R8!)
+constexpr uint8_t kPinSin = 15;
+constexpr uint8_t kPinSclk = 16;
+constexpr uint8_t kPinLat = 17;
 constexpr uint8_t kPinGsclk = 2;
 constexpr uint32_t kGsclkFrequencyHz = 33000000;
 constexpr uint32_t kSpiFrequencyHz = 25000000;
@@ -211,6 +211,7 @@ uint16_t gLastRemotePacketID = 0;
 uint16_t gLocalPacketIdCounter = 1;
 uint32_t gLastPacketReceivedMs = 0;
 uint32_t gLastConnectAttemptMs = 0;
+bool gWaitingForInitialDump = true;
 EthernetUDP gUdp;
 
 // Switcher states tracked
@@ -288,7 +289,7 @@ void setupMatrix() {
 }
 
 // Custom ATEM library core functions
-void sendAck(uint16_t remotePacketId) {
+void sendAck(uint16_t remotePacketId, bool special = false) {
   uint8_t ack[12];
   memset(ack, 0, 12);
   ack[0] = 0x80; // ACK flag
@@ -297,7 +298,11 @@ void sendAck(uint16_t remotePacketId) {
   ack[3] = gSessionID & 0xFF;
   ack[4] = remotePacketId >> 8;
   ack[5] = remotePacketId & 0xFF;
-  ack[9] = 0x41; // Standard ATEM ACK code
+  if (special) {
+    ack[9] = 0x61; // Remote sequence number set to 0x61 for empty packet ACK
+  } else {
+    ack[9] = 0x00; // Remote sequence number is 0 for standard ACKs
+  }
 
   gUdp.beginPacket(kSwitcherIp, kSwitcherPort);
   gUdp.write(ack, 12);
@@ -346,6 +351,7 @@ void sendCommand(const char* cmdName, const uint8_t* payload, uint8_t payloadLen
 void connectToAtem() {
   gLocalPacketIdCounter = 1;
   gLastConnectAttemptMs = millis();
+  gWaitingForInitialDump = true;
   
   // Handshake SYN packet
   uint8_t connectHello[] = {
@@ -385,47 +391,79 @@ void parseAtemState(const uint8_t* packet, uint16_t packetLen) {
     if (strcmp(cmd, "PrgI") == 0) {
       uint8_t me = data[0];
       uint16_t src = (data[2] << 8) | data[3];
-      if (me == 0) gActiveProgramSource = src;
+      if (me == 0 && gActiveProgramSource != src) {
+        gActiveProgramSource = src;
+        Serial.printf("STATE: Program Input -> %u\r\n", src);
+      }
     } else if (strcmp(cmd, "PrvI") == 0) {
       uint8_t me = data[0];
       uint16_t src = (data[2] << 8) | data[3];
-      if (me == 0) gActivePreviewSource = src;
+      if (me == 0 && gActivePreviewSource != src) {
+        gActivePreviewSource = src;
+        Serial.printf("STATE: Preview Input -> %u\r\n", src);
+      }
     } else if (strcmp(cmd, "DskS") == 0) {
       uint8_t idx = data[0];
       bool onAir = data[1] != 0;
       bool transitioning = data[2] != 0;
       if (idx < 2) {
-        gDskOnAir[idx] = onAir;
-        gDskTransitioning[idx] = transitioning;
+        if (gDskOnAir[idx] != onAir || gDskTransitioning[idx] != transitioning) {
+          gDskOnAir[idx] = onAir;
+          gDskTransitioning[idx] = transitioning;
+          Serial.printf("STATE: DSK%d -> OnAir: %d, Trans: %d\r\n", idx + 1, onAir, transitioning);
+        }
       }
     } else if (strcmp(cmd, "DskP") == 0) {
       uint8_t idx = data[0];
       bool tie = data[1] != 0;
-      if (idx < 2) gDskTie[idx] = tie;
+      if (idx < 2) {
+        if (gDskTie[idx] != tie) {
+          gDskTie[idx] = tie;
+          Serial.printf("STATE: DSK%d Tie -> %d\r\n", idx + 1, tie);
+        }
+      }
     } else if (strcmp(cmd, "KeOn") == 0) {
       uint8_t me = data[0];
       uint8_t idx = data[1];
       bool onAir = data[2] != 0;
-      if (me == 0 && idx == 0) gKey1OnAir = onAir;
+      if (me == 0 && idx == 0) {
+        if (gKey1OnAir != onAir) {
+          gKey1OnAir = onAir;
+          Serial.printf("STATE: KEY1 OnAir -> %d\r\n", onAir);
+        }
+      }
     } else if (strcmp(cmd, "TrSS") == 0) {
       uint8_t me = data[0];
       uint8_t nextTr = data[2];
       if (me == 0) {
-        gNextTrBkgd = (nextTr & 0x01) != 0;
-        gNextTrKey1 = (nextTr & 0x02) != 0;
+        bool bkgd = (nextTr & 0x01) != 0;
+        bool key1 = (nextTr & 0x02) != 0;
+        if (gNextTrBkgd != bkgd || gNextTrKey1 != key1) {
+          gNextTrBkgd = bkgd;
+          gNextTrKey1 = key1;
+          Serial.printf("STATE: Next Transition -> BKGD: %d, KEY1: %d\r\n", bkgd, key1);
+        }
       }
     } else if (strcmp(cmd, "FtbS") == 0) {
       uint8_t me = data[0];
       bool ftbDone = data[1] != 0;
       bool ftbActive = data[2] != 0;
       if (me == 0) {
-        gFtbDone = ftbDone;
-        gFtbActive = ftbActive;
+        if (gFtbDone != ftbDone || gFtbActive != ftbActive) {
+          gFtbDone = ftbDone;
+          gFtbActive = ftbActive;
+          Serial.printf("STATE: FTB -> Done: %d, Active: %d\r\n", ftbDone, ftbActive);
+        }
       }
     } else if (strcmp(cmd, "TrIP") == 0) {
       uint8_t me = data[0];
       bool inProgress = data[1] != 0;
-      if (me == 0) gTransitionInProgress = inProgress;
+      if (me == 0) {
+        if (gTransitionInProgress != inProgress) {
+          gTransitionInProgress = inProgress;
+          Serial.printf("STATE: Transition in Progress -> %d\r\n", inProgress);
+        }
+      }
     } else if (strcmp(cmd, "InCm") == 0) {
       Serial.println("ATEM: Initial configuration complete.");
     }
@@ -453,13 +491,22 @@ void updateAtemConnection() {
 
       // Check if it's SYN response (packetSize 20 and starts with 0x10)
       if ((buffer[0] & 0x10) != 0) {
-        gSessionID = (buffer[2] << 8) | buffer[3];
-        gLastRemotePacketID = 0;
-        sendAck(0); // Acknowledge SYN response
+        uint8_t status = buffer[12];
+        if (status == 0x02) {
+          gSessionID = (buffer[2] << 8) | buffer[3];
+          gLastRemotePacketID = 0;
+          sendAck(0); // Acknowledge SYN response
 
-        gAtemState = AtemState::CONNECTED;
-        gLastPacketReceivedMs = millis();
-        Serial.printf("ATEM Connected: SessionID = 0x%04X\r\n", gSessionID);
+          gAtemState = AtemState::CONNECTED;
+          gLastPacketReceivedMs = millis();
+          Serial.printf("ATEM Connected: SessionID = 0x%04X\r\n", gSessionID);
+        } else if (status == 0x04) {
+          Serial.println("ATEM connection rejected (status 0x04). Retrying...");
+          gAtemState = AtemState::DISCONNECTED;
+        } else {
+          Serial.printf("ATEM connection unexpected status 0x%02X. Retrying...\r\n", status);
+          gAtemState = AtemState::DISCONNECTED;
+        }
       }
     } else if (now - gLastConnectAttemptMs > kAtemConnectRetryIntervalMs) {
       Serial.println("ATEM connection handshake timeout. Retrying...");
@@ -494,9 +541,15 @@ void updateAtemConnection() {
         return;
       }
 
-      // If switcher expects ACK, acknowledge immediately
+      // If switcher expects ACK, acknowledge
       if (flags & 0x08) {
-        sendAck(remotePacketId);
+        if (gWaitingForInitialDump && packetSize == 12) {
+          sendAck(remotePacketId, true); // Special ACK for first empty packet (0x61)
+          gWaitingForInitialDump = false;
+          Serial.println("ATEM: Initial dump complete. Ready.");
+        } else {
+          sendAck(remotePacketId, false); // Standard ACK (0x00)
+        }
       }
 
       // Parse payload state fields
