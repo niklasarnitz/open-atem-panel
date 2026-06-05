@@ -4,6 +4,9 @@
 #include <Wire.h>
 #include <MCP23017.h>
 #include <TLC5955.h>
+#include <utility/w5100.h>
+
+#include "atem_client.h"
 
 // Static declarations for TLC5955 library
 const uint8_t TLC5955::chip_count = 3;
@@ -21,22 +24,30 @@ constexpr uint32_t kBaudRate = 115200;
 constexpr uint32_t kDebounceMs = 20;
 constexpr uint32_t kScanIntervalMs = 2;
 constexpr uint32_t kLedUpdateIntervalMs = 50;
-constexpr uint32_t kAtemTimeoutMs = 5000;
-constexpr uint32_t kAtemConnectRetryIntervalMs = 2000;
+constexpr uint32_t kAtemTaskDelayMs = 1;
+constexpr uint32_t kEthernetLinkPollMs = 500;
+constexpr uint32_t kAtemTaskStackWords = 6144;
+constexpr UBaseType_t kAtemTaskPriority = 2;
 
 // Network configuration parameters
-const IPAddress kLocalIp(192, 168, 178, 246);
-const IPAddress kGateway(192, 168, 178, 1);
+const IPAddress kLocalIp(10, 0, 0, 142);
+const IPAddress kGateway(10, 0, 0, 254);
 const IPAddress kSubnet(255, 255, 255, 0);
-const IPAddress kSwitcherIp(192, 168, 178, 240);
+
+const IPAddress kSwitcherIp(10, 0, 0, 146);
 
 constexpr uint16_t kSwitcherPort = 9910;
 constexpr uint16_t kLocalPort = 50991;
 
+AtemClient gAtem(kSwitcherIp, kSwitcherPort, kLocalPort);
+TaskHandle_t gAtemTaskHandle = nullptr;
+EthernetLinkStatus gLastEthernetLinkStatus = Unknown;
+uint32_t gLastEthernetLinkPollMs = 0;
+
 // SPI pins for Waveshare ESP32-S3-ETH (W5500 Ethernet)
 constexpr uint8_t kEthMosiPin = 11;
-constexpr uint8_t kEthMisoPin = 13;
-constexpr uint8_t kEthSclkPin = 12;
+constexpr uint8_t kEthMisoPin = 12;
+constexpr uint8_t kEthSclkPin = 13;
 constexpr uint8_t kEthCsPin = 14;
 constexpr uint8_t kEthRstPin = 9;
 
@@ -49,7 +60,7 @@ constexpr uint8_t kEthRstPin = 9;
 #endif
 constexpr uint8_t kI2cSdaPin = KEYMATRIX_MCP_SDA_PIN;
 constexpr uint8_t kI2cSclPin = KEYMATRIX_MCP_SCL_PIN;
-constexpr uint32_t kI2cFrequencyHz = 1000000;
+constexpr uint32_t kI2cFrequencyHz = 400000;
 constexpr uint8_t kMcpAddress = 0x20;
 
 // MCP23017 rows & columns configuration
@@ -66,12 +77,14 @@ constexpr uint8_t kPinSin = 15;
 constexpr uint8_t kPinSclk = 16;
 constexpr uint8_t kPinLat = 17;
 constexpr uint8_t kPinGsclk = 2;
-constexpr uint32_t kGsclkFrequencyHz = 33000000;
+constexpr uint8_t kPinMiso = 4;
+constexpr uint32_t kGsclkFrequencyHz = 20000000;
 constexpr uint32_t kSpiFrequencyHz = 25000000;
 
 // LED Brightness values
 constexpr uint16_t kLedBrightness = 0xFFFF;
 constexpr uint16_t kDimBrightness = 0x0800;
+constexpr uint16_t kFaderLedBrightness = 0x1800;
 
 constexpr uint16_t bitFor(uint8_t pin) {
   return static_cast<uint16_t>(1U << pin);
@@ -90,8 +103,8 @@ constexpr uint16_t kColMask =
     bitFor(5) | bitFor(6) | bitFor(8) | bitFor(9);
 
 MCP23017 gMcp(kMcpAddress);
+SPIClass gTlcSpi(HSPI);
 TLC5955 gTlc;
-uint16_t gMcpOutputState = 0;
 bool gMatrixReady = false;
 
 bool gStableState[kRowCount][kColCount] = {};
@@ -147,6 +160,27 @@ constexpr RgbLedMapping kRgbLeds[] = {
     {LedId::DSK1_TIE, "DSK1 TIE", channelFor(2, 7, 0), channelFor(2, 7, 1), channelFor(2, 7, 2)},
 };
 
+// Top-to-bottom fader LED order. LED 1 is the top physical LED, LED 16 is the bottom one.
+constexpr uint16_t kFaderLedChannels[] = {
+    channelFor(1, 3, 0),
+    channelFor(1, 6, 0),
+    channelFor(1, 7, 0),
+    channelFor(1, 8, 0),
+    channelFor(1, 10, 0),
+    channelFor(1, 12, 0),
+    channelFor(1, 13, 0),
+    channelFor(1, 14, 0),
+    channelFor(2, 4, 0),
+    channelFor(2, 8, 0),
+    channelFor(2, 9, 0),
+    channelFor(2, 10, 0),
+    channelFor(2, 11, 0),
+    channelFor(2, 12, 0),
+    channelFor(2, 13, 0),
+    channelFor(2, 14, 0),
+};
+constexpr size_t kFaderLedCount = sizeof(kFaderLedChannels) / sizeof(kFaderLedChannels[0]);
+
 struct ButtonMapping {
   uint8_t row;
   uint8_t col;
@@ -187,47 +221,6 @@ constexpr ButtonMapping kButtonMappings[] = {
     {47, 40, "DSK2 TIE", LedId::DSK2_TIE},
 };
 
-// Shift Mappings (SDI 9-10, Media Players, Generators, Color Bars, Black)
-constexpr uint16_t kShiftSources[] = {
-    9,     // SDI 9
-    10,    // SDI 10
-    3010,  // Media Player 1
-    3020,  // Media Player 2
-    2001,  // Color Generator 1
-    2002,  // Color Generator 2
-    10010, // Color Bars
-    0      // Black
-};
-
-// ATEM client state variables
-enum class AtemState {
-  DISCONNECTED,
-  CONNECTING,
-  CONNECTED
-};
-
-AtemState gAtemState = AtemState::DISCONNECTED;
-uint16_t gSessionID = 0;
-uint16_t gLastRemotePacketID = 0;
-uint16_t gLocalPacketIdCounter = 1;
-uint32_t gLastPacketReceivedMs = 0;
-uint32_t gLastConnectAttemptMs = 0;
-bool gWaitingForInitialDump = true;
-EthernetUDP gUdp;
-
-// Switcher states tracked
-uint16_t gActiveProgramSource = 0;
-uint16_t gActivePreviewSource = 0;
-bool gKey1OnAir = false;
-bool gNextTrBkgd = false;
-bool gNextTrKey1 = false;
-bool gDskOnAir[2] = {false, false};
-bool gDskTie[2] = {false, false};
-bool gDskTransitioning[2] = {false, false};
-bool gFtbActive = false;
-bool gFtbDone = false;
-bool gTransitionInProgress = false;
-
 // Control panel local toggles
 bool gPgmShift = false;
 bool gPrvShift = false;
@@ -259,7 +252,7 @@ void setRgbLed(LedId id, uint16_t red, uint16_t green, uint16_t blue) {
 }
 
 void setupTlc() {
-  gTlc.init(kPinLat, kPinSin, kPinSclk, kPinGsclk);
+  gTlc.init(kPinLat, kPinSin, kPinSclk, kPinGsclk, &gTlcSpi, kPinMiso);
   gTlc.set_sclk_frequency(kSpiFrequencyHz);
   gTlc.set_gsclk_frequency(kGsclkFrequencyHz);
 
@@ -277,293 +270,59 @@ void setupMatrix() {
   Wire.begin(kI2cSdaPin, kI2cSclPin);
   Wire.setClock(kI2cFrequencyHz);
 
+  // Auto-detect MCP23017 I2C Address (range 0x20 to 0x27)
+  uint8_t detectedAddr = 0;
+  for (uint8_t addr = 0x20; addr <= 0x27; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      detectedAddr = addr;
+      break;
+    }
+  }
+
+  if (detectedAddr == 0) {
+    Serial.println("ERROR: MCP23017 not found on I2C bus! Scanning entire bus...");
+    bool foundDevice = false;
+    for (uint8_t addr = 1; addr < 127; ++addr) {
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        Serial.printf("  I2C device detected at address 0x%02X\r\n", addr);
+        foundDevice = true;
+      }
+    }
+    if (!foundDevice) {
+      Serial.println("  No I2C devices found at all. Check SDA/SCL lines and pull-up resistors.");
+    }
+    return;
+  }
+
+  Serial.printf("I2C: MCP23017 auto-detected at address 0x%02X\r\n", detectedAddr);
+  gMcp = MCP23017(detectedAddr);
+
   if (!gMcp.begin(false)) {
-    Serial.println("ERROR: MCP23017 not found at address 0x20");
+    Serial.printf("ERROR: Failed to initialize MCP23017 at address 0x%02X\r\n", detectedAddr);
     return;
   }
 
   gMcp.reverse16ByteOrder(false);
-  gMcp.pinMode16(kColMask);
-  gMcp.setPullup16(0);
-  gMcp.write16(gMcpOutputState);
+
+  for (size_t row = 0; row < kRowCount; ++row) {
+    gMcp.pinMode1(kMcpRowPins[row], INPUT_PULLUP);
+    gMcp.setPullup(kMcpRowPins[row], true);
+  }
+
+  for (size_t col = 0; col < kColCount; ++col) {
+    gMcp.pinMode1(kMcpColPins[col], OUTPUT);
+    gMcp.write1(kMcpColPins[col], HIGH);
+  }
+
   gMatrixReady = true;
 }
 
-// Custom ATEM library core functions
-void sendAck(uint16_t remotePacketId, bool special = false) {
-  uint8_t ack[12];
-  memset(ack, 0, 12);
-  ack[0] = 0x80; // ACK flag
-  ack[1] = 0x0C; // Packet length (12)
-  ack[2] = gSessionID >> 8;
-  ack[3] = gSessionID & 0xFF;
-  ack[4] = remotePacketId >> 8;
-  ack[5] = remotePacketId & 0xFF;
-  if (special) {
-    ack[9] = 0x61; // Remote sequence number set to 0x61 for empty packet ACK
-  } else {
-    ack[9] = 0x00; // Remote sequence number is 0 for standard ACKs
-  }
-
-  gUdp.beginPacket(kSwitcherIp, kSwitcherPort);
-  gUdp.write(ack, 12);
-  gUdp.endPacket();
-}
-
-void sendCommand(const char* cmdName, const uint8_t* payload, uint8_t payloadLen) {
-  if (gAtemState != AtemState::CONNECTED) return;
-
-  uint16_t cmdLen = 8 + payloadLen;
-  uint16_t packetLen = 12 + cmdLen;
-
-  uint8_t packet[64];
-  memset(packet, 0, sizeof(packet));
-
-  // UDP Header
-  packet[0] = 0x08 | (packetLen >> 8); // Reliable flag (0x08) + high length
-  packet[1] = packetLen & 0xFF;
-  packet[2] = gSessionID >> 8;
-  packet[3] = gSessionID & 0xFF;
-  packet[4] = gLastRemotePacketID >> 8;
-  packet[5] = gLastRemotePacketID & 0xFF;
-  packet[10] = gLocalPacketIdCounter >> 8;
-  packet[11] = gLocalPacketIdCounter & 0xFF;
-
-  // Command Header
-  packet[12] = cmdLen >> 8;
-  packet[13] = cmdLen & 0xFF;
-  packet[16] = cmdName[0];
-  packet[17] = cmdName[1];
-  packet[18] = cmdName[2];
-  packet[19] = cmdName[3];
-
-  // Command Payload
-  for (uint8_t i = 0; i < payloadLen; ++i) {
-    packet[20 + i] = payload[i];
-  }
-
-  gLocalPacketIdCounter++;
-
-  gUdp.beginPacket(kSwitcherIp, kSwitcherPort);
-  gUdp.write(packet, packetLen);
-  gUdp.endPacket();
-}
-
-void connectToAtem() {
-  gLocalPacketIdCounter = 1;
-  gLastConnectAttemptMs = millis();
-  gWaitingForInitialDump = true;
-  
-  // Handshake SYN packet
-  uint8_t connectHello[] = {
-      0x10, 0x14, // SYN, Length 20
-      0x53, 0xAB, // Client Session ID
-      0x00, 0x00,
-      0x00, 0x00,
-      0x00, 0x3A, // Sequence indicator
-      0x00, 0x00,
-      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-  };
-
-  gUdp.beginPacket(kSwitcherIp, kSwitcherPort);
-  gUdp.write(connectHello, sizeof(connectHello));
-  gUdp.endPacket();
-
-  gAtemState = AtemState::CONNECTING;
-  Serial.println("ATEM Handshake: Sending SYN...");
-}
-
-void parseAtemState(const uint8_t* packet, uint16_t packetLen) {
-  uint16_t offset = 12; // Start after 12-byte header
-  while (offset < packetLen) {
-    uint16_t cmdLen = (packet[offset] << 8) | packet[offset + 1];
-    if (cmdLen < 8 || offset + cmdLen > packetLen) break;
-
-    char cmd[5] = {
-        (char)packet[offset + 4],
-        (char)packet[offset + 5],
-        (char)packet[offset + 6],
-        (char)packet[offset + 7],
-        0
-    };
-
-    const uint8_t* data = packet + offset + 8;
-
-    if (strcmp(cmd, "PrgI") == 0) {
-      uint8_t me = data[0];
-      uint16_t src = (data[2] << 8) | data[3];
-      if (me == 0 && gActiveProgramSource != src) {
-        gActiveProgramSource = src;
-        Serial.printf("STATE: Program Input -> %u\r\n", src);
-      }
-    } else if (strcmp(cmd, "PrvI") == 0) {
-      uint8_t me = data[0];
-      uint16_t src = (data[2] << 8) | data[3];
-      if (me == 0 && gActivePreviewSource != src) {
-        gActivePreviewSource = src;
-        Serial.printf("STATE: Preview Input -> %u\r\n", src);
-      }
-    } else if (strcmp(cmd, "DskS") == 0) {
-      uint8_t idx = data[0];
-      bool onAir = data[1] != 0;
-      bool transitioning = data[2] != 0;
-      if (idx < 2) {
-        if (gDskOnAir[idx] != onAir || gDskTransitioning[idx] != transitioning) {
-          gDskOnAir[idx] = onAir;
-          gDskTransitioning[idx] = transitioning;
-          Serial.printf("STATE: DSK%d -> OnAir: %d, Trans: %d\r\n", idx + 1, onAir, transitioning);
-        }
-      }
-    } else if (strcmp(cmd, "DskP") == 0) {
-      uint8_t idx = data[0];
-      bool tie = data[1] != 0;
-      if (idx < 2) {
-        if (gDskTie[idx] != tie) {
-          gDskTie[idx] = tie;
-          Serial.printf("STATE: DSK%d Tie -> %d\r\n", idx + 1, tie);
-        }
-      }
-    } else if (strcmp(cmd, "KeOn") == 0) {
-      uint8_t me = data[0];
-      uint8_t idx = data[1];
-      bool onAir = data[2] != 0;
-      if (me == 0 && idx == 0) {
-        if (gKey1OnAir != onAir) {
-          gKey1OnAir = onAir;
-          Serial.printf("STATE: KEY1 OnAir -> %d\r\n", onAir);
-        }
-      }
-    } else if (strcmp(cmd, "TrSS") == 0) {
-      uint8_t me = data[0];
-      uint8_t nextTr = data[2];
-      if (me == 0) {
-        bool bkgd = (nextTr & 0x01) != 0;
-        bool key1 = (nextTr & 0x02) != 0;
-        if (gNextTrBkgd != bkgd || gNextTrKey1 != key1) {
-          gNextTrBkgd = bkgd;
-          gNextTrKey1 = key1;
-          Serial.printf("STATE: Next Transition -> BKGD: %d, KEY1: %d\r\n", bkgd, key1);
-        }
-      }
-    } else if (strcmp(cmd, "FtbS") == 0) {
-      uint8_t me = data[0];
-      bool ftbDone = data[1] != 0;
-      bool ftbActive = data[2] != 0;
-      if (me == 0) {
-        if (gFtbDone != ftbDone || gFtbActive != ftbActive) {
-          gFtbDone = ftbDone;
-          gFtbActive = ftbActive;
-          Serial.printf("STATE: FTB -> Done: %d, Active: %d\r\n", ftbDone, ftbActive);
-        }
-      }
-    } else if (strcmp(cmd, "TrIP") == 0) {
-      uint8_t me = data[0];
-      bool inProgress = data[1] != 0;
-      if (me == 0) {
-        if (gTransitionInProgress != inProgress) {
-          gTransitionInProgress = inProgress;
-          Serial.printf("STATE: Transition in Progress -> %d\r\n", inProgress);
-        }
-      }
-    } else if (strcmp(cmd, "InCm") == 0) {
-      Serial.println("ATEM: Initial configuration complete.");
-    }
-
-    offset += cmdLen;
-  }
-}
-
-void updateAtemConnection() {
-  uint32_t now = millis();
-
-  // Disconnection and connection logic
-  if (gAtemState == AtemState::DISCONNECTED) {
-    if (now - gLastConnectAttemptMs > kAtemConnectRetryIntervalMs) {
-      connectToAtem();
-    }
-    return;
-  }
-
-  if (gAtemState == AtemState::CONNECTING) {
-    int packetSize = gUdp.parsePacket();
-    if (packetSize == 20) {
-      uint8_t buffer[20];
-      gUdp.read(buffer, 20);
-
-      // Check if it's SYN response (packetSize 20 and starts with 0x10)
-      if ((buffer[0] & 0x10) != 0) {
-        uint8_t status = buffer[12];
-        if (status == 0x02) {
-          gSessionID = (buffer[2] << 8) | buffer[3];
-          gLastRemotePacketID = 0;
-          sendAck(0); // Acknowledge SYN response
-
-          gAtemState = AtemState::CONNECTED;
-          gLastPacketReceivedMs = millis();
-          Serial.printf("ATEM Connected: SessionID = 0x%04X\r\n", gSessionID);
-        } else if (status == 0x04) {
-          Serial.println("ATEM connection rejected (status 0x04). Retrying...");
-          gAtemState = AtemState::DISCONNECTED;
-        } else {
-          Serial.printf("ATEM connection unexpected status 0x%02X. Retrying...\r\n", status);
-          gAtemState = AtemState::DISCONNECTED;
-        }
-      }
-    } else if (now - gLastConnectAttemptMs > kAtemConnectRetryIntervalMs) {
-      Serial.println("ATEM connection handshake timeout. Retrying...");
-      gAtemState = AtemState::DISCONNECTED;
-    }
-    return;
-  }
-
-  // Handle connected communication state
-  if (gAtemState == AtemState::CONNECTED) {
-    if (now - gLastPacketReceivedMs > kAtemTimeoutMs) {
-      Serial.println("ATEM connection timed out. Reconnecting...");
-      gAtemState = AtemState::DISCONNECTED;
-      return;
-    }
-
-    int packetSize = gUdp.parsePacket();
-    if (packetSize > 0) {
-      gLastPacketReceivedMs = now;
-      uint8_t buffer[1500];
-      if (packetSize > (int)sizeof(buffer)) packetSize = sizeof(buffer);
-      gUdp.read(buffer, packetSize);
-
-      uint8_t flags = buffer[0] & 0xF8;
-      uint16_t remotePacketId = (buffer[10] << 8) | buffer[11];
-      gLastRemotePacketID = remotePacketId;
-
-      // Check for SYN redirect/restart (0x10 and redirect payload)
-      if (flags & 0x10) {
-        // Redirection or reset from switcher
-        gAtemState = AtemState::DISCONNECTED;
-        return;
-      }
-
-      // If switcher expects ACK, acknowledge
-      if (flags & 0x08) {
-        if (gWaitingForInitialDump && packetSize == 12) {
-          sendAck(remotePacketId, true); // Special ACK for first empty packet (0x61)
-          gWaitingForInitialDump = false;
-          Serial.println("ATEM: Initial dump complete. Ready.");
-        } else {
-          sendAck(remotePacketId, false); // Standard ACK (0x00)
-        }
-      }
-
-      // Parse payload state fields
-      if (packetSize > 12) {
-        parseAtemState(buffer, packetSize);
-      }
-    }
-  }
-}
-
 // Button Matrix scans and client commands dispatcher
-void handleButtonPress(const ButtonMapping* button) {
-  Serial.printf("BUTTON PRESS: %s\r\n", button->name);
+void handleButtonPress(const ButtonMapping* button, uint8_t row, uint8_t col) {
+  Serial.printf("BUTTON PRESS: %s (row %u, col %u)\r\n", button->name, row, col);
+  const AtemSwitcherState& atem = gAtem.state();
 
   // Parse button name to index (1-8)
   uint8_t btnIdx = 0;
@@ -574,15 +333,19 @@ void handleButtonPress(const ButtonMapping* button) {
   }
 
   if (strncmp(button->name, "PGM", 3) == 0 && btnIdx > 0) {
-    uint16_t src = gPgmShift ? kShiftSources[btnIdx - 1] : btnIdx;
+    uint16_t src = gAtem.sourceForButton(btnIdx - 1, gPgmShift);
+    if (src == kUnknownAtemSource) return;
     uint8_t payload[4] = { 0x00, 0x00, (uint8_t)(src >> 8), (uint8_t)(src & 0xFF) };
-    sendCommand("CPgI", payload, 4);
-    Serial.printf("Sent CPgI program source %d\r\n", src);
+    if (gAtem.sendCommand("CPgI", payload, 4)) {
+      Serial.printf("Sent CPgI program source %d\r\n", src);
+    }
   } else if (strncmp(button->name, "Preview", 7) == 0 && btnIdx > 0) {
-    uint16_t src = gPrvShift ? kShiftSources[btnIdx - 1] : btnIdx;
+    uint16_t src = gAtem.sourceForButton(btnIdx - 1, gPrvShift);
+    if (src == kUnknownAtemSource) return;
     uint8_t payload[4] = { 0x00, 0x00, (uint8_t)(src >> 8), (uint8_t)(src & 0xFF) };
-    sendCommand("CPvI", payload, 4);
-    Serial.printf("Sent CPvI preview source %d\r\n", src);
+    if (gAtem.sendCommand("CPvI", payload, 4)) {
+      Serial.printf("Sent CPvI preview source %d\r\n", src);
+    }
   } else if (strcmp(button->name, "PGM Shift") == 0) {
     gPgmShift = !gPgmShift;
     Serial.printf("PGM Shift toggle -> %s\r\n", gPgmShift ? "ON" : "OFF");
@@ -590,84 +353,122 @@ void handleButtonPress(const ButtonMapping* button) {
     gPrvShift = !gPrvShift;
     Serial.printf("Preview Shift toggle -> %s\r\n", gPrvShift ? "ON" : "OFF");
   } else if (strcmp(button->name, "CUT") == 0) {
-    uint8_t payload[4] = { 0x00, 0xEF, 0xBF, 0x5F };
-    sendCommand("DCut", payload, 4);
-    Serial.println("Sent DCut");
+    uint8_t payload[4] = { 0x00, 0x00, 0x00, 0x00 };
+    if (gAtem.sendCommand("DCut", payload, 4)) {
+      Serial.println("Sent DCut");
+    }
   } else if (strcmp(button->name, "AUTO") == 0) {
-    uint8_t payload[4] = { 0x00, 0x32, 0x16, 0x02 };
-    sendCommand("DAut", payload, 4);
-    Serial.println("Sent DAut");
+    uint8_t payload[4] = { 0x00, 0x00, 0x00, 0x00 };
+    if (gAtem.sendCommand("DAut", payload, 4)) {
+      Serial.println("Sent DAut");
+    }
   } else if (strcmp(button->name, "KEY1 CUT") == 0) {
-    bool newState = !gKey1OnAir;
+    bool newState = !atem.key1OnAir;
     uint8_t payload[4] = { 0x00, 0x00, (uint8_t)(newState ? 1 : 0), 0x00 };
-    sendCommand("CKOn", payload, 4);
-    Serial.printf("Sent CKOn state %d\r\n", newState);
+    if (gAtem.sendCommand("CKOn", payload, 4)) {
+      Serial.printf("Sent CKOn state %d\r\n", newState);
+    }
   } else if (strcmp(button->name, "KEY1 TIE") == 0) {
-    uint8_t nextTr = (gNextTrBkgd ? 1 : 0) | (gNextTrKey1 ? 2 : 0);
+    uint8_t nextTr = (atem.nextTrBkgd ? 1 : 0) | (atem.nextTrKey1 ? 2 : 0);
     nextTr ^= 2; // Toggle Key 1
     uint8_t payload[4] = { 0x02, 0x00, 0x00, nextTr }; // Next transition selection change mask = 0x02
-    sendCommand("CTTp", payload, 4);
-    Serial.printf("Sent CTTp selection %d\r\n", nextTr);
+    if (gAtem.sendCommand("CTTp", payload, 4)) {
+      Serial.printf("Sent CTTp selection %d\r\n", nextTr);
+    }
   } else if (strcmp(button->name, "BKGD") == 0) {
-    uint8_t nextTr = (gNextTrBkgd ? 1 : 0) | (gNextTrKey1 ? 2 : 0);
+    uint8_t nextTr = (atem.nextTrBkgd ? 1 : 0) | (atem.nextTrKey1 ? 2 : 0);
     nextTr ^= 1; // Toggle BKGD
     uint8_t payload[4] = { 0x02, 0x00, 0x00, nextTr };
-    sendCommand("CTTp", payload, 4);
-    Serial.printf("Sent CTTp selection %d\r\n", nextTr);
+    if (gAtem.sendCommand("CTTp", payload, 4)) {
+      Serial.printf("Sent CTTp selection %d\r\n", nextTr);
+    }
   } else if (strcmp(button->name, "DSK1 CUT") == 0) {
-    bool newState = !gDskOnAir[0];
+    if (!gAtem.supportsDownstreamKeyer(0)) return;
+    bool newState = !atem.dskOnAir[0];
     uint8_t payload[4] = { 0x00, (uint8_t)(newState ? 1 : 0), 0x00, 0x00 };
-    sendCommand("CDsO", payload, 4);
-    Serial.printf("Sent CDsO DSK1 state %d\r\n", newState);
+    if (gAtem.sendCommand("CDsL", payload, 4)) {
+      Serial.printf("Sent CDsL DSK1 state %d\r\n", newState);
+    }
   } else if (strcmp(button->name, "DSK2 CUT") == 0) {
-    bool newState = !gDskOnAir[1];
+    if (!gAtem.supportsDownstreamKeyer(1)) return;
+    bool newState = !atem.dskOnAir[1];
     uint8_t payload[4] = { 0x01, (uint8_t)(newState ? 1 : 0), 0x00, 0x00 };
-    sendCommand("CDsO", payload, 4);
-    Serial.printf("Sent CDsO DSK2 state %d\r\n", newState);
+    if (gAtem.sendCommand("CDsL", payload, 4)) {
+      Serial.printf("Sent CDsL DSK2 state %d\r\n", newState);
+    }
   } else if (strcmp(button->name, "DSK1 TIE") == 0) {
-    bool newState = !gDskTie[0];
+    if (!gAtem.supportsDownstreamKeyer(0)) return;
+    bool newState = !atem.dskTie[0];
     uint8_t payload[4] = { 0x00, (uint8_t)(newState ? 1 : 0), 0x00, 0x00 };
-    sendCommand("CDsT", payload, 4);
-    Serial.printf("Sent CDsT DSK1 state %d\r\n", newState);
+    if (gAtem.sendCommand("CDsT", payload, 4)) {
+      Serial.printf("Sent CDsT DSK1 state %d\r\n", newState);
+    }
   } else if (strcmp(button->name, "DSK2 TIE") == 0) {
-    bool newState = !gDskTie[1];
+    if (!gAtem.supportsDownstreamKeyer(1)) return;
+    bool newState = !atem.dskTie[1];
     uint8_t payload[4] = { 0x01, (uint8_t)(newState ? 1 : 0), 0x00, 0x00 };
-    sendCommand("CDsT", payload, 4);
-    Serial.printf("Sent CDsT DSK2 state %d\r\n", newState);
+    if (gAtem.sendCommand("CDsT", payload, 4)) {
+      Serial.printf("Sent CDsT DSK2 state %d\r\n", newState);
+    }
   } else if (strcmp(button->name, "DSK1 AUTO") == 0) {
+    if (!gAtem.supportsDownstreamKeyer(0)) return;
     uint8_t payload[4] = { 0x00, 0x00, 0x00, 0x00 };
-    sendCommand("DDsA", payload, 4);
-    Serial.println("Sent DDsA DSK1 Auto");
+    if (gAtem.sendCommand("DDsA", payload, 4)) {
+      Serial.println("Sent DDsA DSK1 Auto");
+    }
   } else if (strcmp(button->name, "DSK2 AUTO") == 0) {
+    if (!gAtem.supportsDownstreamKeyer(1)) return;
     uint8_t payload[4] = { 0x01, 0x00, 0x00, 0x00 };
-    sendCommand("DDsA", payload, 4);
-    Serial.println("Sent DDsA DSK2 Auto");
+    if (gAtem.sendCommand("DDsA", payload, 4)) {
+      Serial.println("Sent DDsA DSK2 Auto");
+    }
   } else if (strcmp(button->name, "FTB") == 0) {
-    uint8_t payload[4] = { 0x00, 0x02, 0x58, 0x99 };
-    sendCommand("FtbA", payload, 4);
-    Serial.println("Sent FtbA");
+    uint8_t payload[4] = { 0x00, 0x00, 0x00, 0x00 };
+    if (gAtem.sendCommand("FtbA", payload, 4)) {
+      Serial.println("Sent FtbA");
+    }
   }
 }
 
-void handleButtonRelease(const ButtonMapping* button) {
-  Serial.printf("BUTTON RELEASE: %s\r\n", button->name);
+void handleButtonRelease(const ButtonMapping* button, uint8_t row, uint8_t col) {
+  Serial.printf("BUTTON RELEASE: %s (row %u, col %u)\r\n", button->name, row, col);
 }
 
 void writeMcpOutputs(uint16_t outputState) {
-  gMcpOutputState = outputState & kRowMask;
-  gMcp.write16(gMcpOutputState);
+  for (size_t col = 0; col < kColCount; ++col) {
+    gMcp.write1(kMcpColPins[col], (outputState & bitFor(kMcpColPins[col])) ? HIGH : LOW);
+  }
+}
+
+void primeMatrixState() {
+  const uint32_t now = millis();
+
+  for (size_t col = 0; col < kColCount; ++col) {
+    gMcp.write1(kMcpColPins[col], LOW);
+    delayMicroseconds(50);
+
+    for (size_t row = 0; row < kRowCount; ++row) {
+      const bool rawPressed = (gMcp.read1(kMcpRowPins[row]) == LOW);
+      gLastRawState[row][col] = rawPressed;
+      gStableState[row][col] = rawPressed;
+      gLastChangeMs[row][col] = now;
+    }
+
+    gMcp.write1(kMcpColPins[col], HIGH);
+  }
+
+  Serial.println("Key matrix baseline captured.");
 }
 
 void scanMatrix() {
   const uint32_t now = millis();
 
-  for (size_t row = 0; row < kRowCount; ++row) {
-    writeMcpOutputs(bitFor(kMcpRowPins[row]));
+  for (size_t col = 0; col < kColCount; ++col) {
+    gMcp.write1(kMcpColPins[col], LOW);
     delayMicroseconds(50);
-    const uint16_t inputs = gMcp.read16();
 
-    for (size_t col = 0; col < kColCount; ++col) {
-      const bool rawPressed = (inputs & bitFor(kMcpColPins[col])) != 0;
+    for (size_t row = 0; row < kRowCount; ++row) {
+      const bool rawPressed = (gMcp.read1(kMcpRowPins[row]) == LOW);
 
       if (rawPressed != gLastRawState[row][col]) {
         gLastRawState[row][col] = rawPressed;
@@ -682,15 +483,20 @@ void scanMatrix() {
         const ButtonMapping* button = findButtonMapping(boardRow, boardCol);
         if (button != nullptr) {
           if (rawPressed) {
-            handleButtonPress(button);
+            handleButtonPress(button, boardRow, boardCol);
           } else {
-            handleButtonRelease(button);
+            handleButtonRelease(button, boardRow, boardCol);
           }
+        } else {
+          Serial.printf("BUTTON %s: unmapped (row %u, col %u)\r\n",
+                        rawPressed ? "PRESS" : "RELEASE",
+                        boardRow,
+                        boardCol);
         }
       }
     }
 
-    writeMcpOutputs(0);
+    gMcp.write1(kMcpColPins[col], HIGH);
   }
 }
 
@@ -706,6 +512,48 @@ void updateMatrixScanner() {
   scanMatrix();
 }
 
+uint8_t faderLedIndexForPosition(uint16_t position) {
+  if (position > kAtemTransitionPositionMax) {
+    position = kAtemTransitionPositionMax;
+  }
+
+  const uint32_t invertedPosition = kAtemTransitionPositionMax - position;
+  return static_cast<uint8_t>(
+      (invertedPosition * (kFaderLedCount - 1) + (kAtemTransitionPositionMax / 2)) /
+      kAtemTransitionPositionMax);
+}
+
+bool isLedSupportedByActiveProfile(const RgbLedMapping& led, uint8_t btnIdx) {
+  if (strncmp(led.name, "PGM", 3) == 0 && btnIdx > 0) {
+    return gAtem.sourceForButton(btnIdx - 1, gPgmShift) != kUnknownAtemSource;
+  }
+
+  if (strncmp(led.name, "Preview", 7) == 0 && btnIdx > 0) {
+    return gAtem.sourceForButton(btnIdx - 1, gPrvShift) != kUnknownAtemSource;
+  }
+
+  if (led.id == LedId::DSK1_CUT || led.id == LedId::DSK1_TIE || led.id == LedId::DSK1_AUTO) {
+    return gAtem.supportsDownstreamKeyer(0);
+  }
+
+  if (led.id == LedId::DSK2_CUT || led.id == LedId::DSK2_TIE || led.id == LedId::DSK2_AUTO) {
+    return gAtem.supportsDownstreamKeyer(1);
+  }
+
+  return true;
+}
+
+void updateFaderLeds() {
+  const AtemSwitcherState& atem = gAtem.state();
+  const uint8_t currentLed = faderLedIndexForPosition(atem.faderLedPosition);
+
+  for (size_t i = 0; i < kFaderLedCount; ++i) {
+    gTlc.set_single_channel(
+        kFaderLedChannels[i],
+        i == currentLed ? kFaderLedBrightness : 0);
+  }
+}
+
 // LED update mapping logic
 void updateLeds() {
   static uint32_t lastLedUpdateMs = 0;
@@ -715,6 +563,7 @@ void updateLeds() {
   lastLedUpdateMs = now;
 
   bool blinkState = (now / 250) % 2 == 0;
+  const AtemSwitcherState& atem = gAtem.state();
 
   gTlc.set_all(0);
 
@@ -729,71 +578,86 @@ void updateLeds() {
       btnIdx = led.name[8] - '0';
     }
 
+    if (!isLedSupportedByActiveProfile(led, btnIdx)) {
+      gTlc.set_single_channel(led.redChannel, 0);
+      gTlc.set_single_channel(led.greenChannel, 0);
+      gTlc.set_single_channel(led.blueChannel, 0);
+      continue;
+    }
+
     // Program inputs row
     if (strncmp(led.name, "PGM", 3) == 0 && btnIdx > 0) {
-      uint16_t src = gPgmShift ? kShiftSources[btnIdx - 1] : btnIdx;
-      if (gActiveProgramSource == src) {
+      const uint16_t normalSrc = gAtem.sourceForButton(btnIdx - 1, false);
+      const uint16_t shiftedSrc = gAtem.sourceForButton(btnIdx - 1, true);
+      if (atem.programSource == normalSrc) {
         r = kLedBrightness; g = 0; b = 0; // Solid Red
-      } else if (gActivePreviewSource == src) {
-        r = 0; g = kLedBrightness; b = 0; // Solid Green (showing selected preview on PGM button)
+      } else if (atem.programSource == shiftedSrc) {
+        r = blinkState ? kLedBrightness : 0;
+        g = 0;
+        b = 0;
       }
     }
     // Preview inputs row
-    else if (strncmp(led.name, "PRV", 3) == 0 && btnIdx > 0) {
-      uint16_t src = gPrvShift ? kShiftSources[btnIdx - 1] : btnIdx;
-      if (gActivePreviewSource == src) {
+    else if (strncmp(led.name, "Preview", 7) == 0 && btnIdx > 0) {
+      const uint16_t normalSrc = gAtem.sourceForButton(btnIdx - 1, false);
+      const uint16_t shiftedSrc = gAtem.sourceForButton(btnIdx - 1, true);
+      if (atem.previewSource == normalSrc) {
         r = 0; g = kLedBrightness; b = 0; // Solid Green
+      } else if (atem.previewSource == shiftedSrc) {
+        r = 0;
+        g = blinkState ? kLedBrightness : 0;
+        b = 0;
       }
     }
     // Shift buttons
     else if (led.id == LedId::PGM_SHIFT) {
       if (gPgmShift) {
-        r = kLedBrightness; g = kLedBrightness; b = 0; // Yellow
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Shift active
       }
     } else if (led.id == LedId::PRV_SHIFT) {
       if (gPrvShift) {
-        r = 0; g = kLedBrightness; b = kLedBrightness; // Cyan
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Shift active
       }
     }
     // Next Transition
     else if (led.id == LedId::BKGD) {
-      if (gNextTrBkgd) {
-        r = 0; g = 0; b = kLedBrightness; // Solid Blue
+      if (atem.nextTrBkgd) {
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Yellow
       }
     } else if (led.id == LedId::KEY1_TIE) {
-      if (gNextTrKey1) {
-        r = 0; g = 0; b = kLedBrightness; // Solid Blue
+      if (atem.nextTrKey1) {
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Yellow
       }
     }
     // Upstream Keyer On Air
     else if (led.id == LedId::KEY1_CUT) {
-      if (gKey1OnAir) {
+      if (atem.key1OnAir) {
         r = kLedBrightness; g = 0; b = 0; // Red
       }
     }
     // DSK Tie
     else if (led.id == LedId::DSK1_TIE) {
-      if (gDskTie[0]) {
-        r = 0; g = 0; b = kLedBrightness; // Blue
+      if (atem.dskTie[0]) {
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Yellow
       }
     } else if (led.id == LedId::DSK2_TIE) {
-      if (gDskTie[1]) {
-        r = 0; g = 0; b = kLedBrightness; // Blue
+      if (atem.dskTie[1]) {
+        r = kLedBrightness; g = kLedBrightness; b = 0; // Yellow
       }
     }
     // DSK Cut / On Air
     else if (led.id == LedId::DSK1_CUT) {
-      if (gDskOnAir[0]) {
+      if (atem.dskOnAir[0]) {
         r = kLedBrightness; g = 0; b = 0; // Red
       }
     } else if (led.id == LedId::DSK2_CUT) {
-      if (gDskOnAir[1]) {
+      if (atem.dskOnAir[1]) {
         r = kLedBrightness; g = 0; b = 0; // Red
       }
     }
     // DSK Auto (Blinks when active)
     else if (led.id == LedId::DSK1_AUTO) {
-      if (gDskTransitioning[0]) {
+      if (atem.dskTransitioning[0]) {
         if (blinkState) {
           r = kLedBrightness; g = 0; b = 0; // Blinking Red
         } else {
@@ -801,7 +665,7 @@ void updateLeds() {
         }
       }
     } else if (led.id == LedId::DSK2_AUTO) {
-      if (gDskTransitioning[1]) {
+      if (atem.dskTransitioning[1]) {
         if (blinkState) {
           r = kLedBrightness; g = 0; b = 0; // Blinking Red
         } else {
@@ -811,19 +675,25 @@ void updateLeds() {
     }
     // Fade to Black
     else if (led.id == LedId::FTB) {
-      if (gFtbActive) {
+      if (!gAtem.connected()) {
+        if (blinkState) {
+          r = 0; g = 0; b = kLedBrightness; // Blinking Blue
+        } else {
+          r = 0; g = 0; b = 0;
+        }
+      } else if (atem.ftbActive) {
         if (blinkState) {
           r = kLedBrightness; g = 0; b = 0; // Blinking Red
         } else {
           r = 0; g = 0; b = 0;
         }
-      } else if (gFtbDone) {
+      } else if (atem.ftbDone) {
         r = kLedBrightness; g = 0; b = 0; // Solid Red
       }
     }
     // Auto transition (Blinks when transition is running)
     else if (led.id == LedId::AUTO) {
-      if (gTransitionInProgress) {
+      if (atem.transitionInProgress) {
         if (blinkState) {
           r = kLedBrightness; g = 0; b = 0;
         } else {
@@ -837,6 +707,7 @@ void updateLeds() {
     gTlc.set_single_channel(led.blueChannel, b);
   }
 
+  updateFaderLeds();
   gTlc.update();
 }
 
@@ -850,6 +721,61 @@ void printHeader() {
   Serial.println();
 }
 
+EthernetLinkStatus pollEthernetLinkStatus(bool forceReport = false) {
+  const uint32_t now = millis();
+  if (!forceReport && (now - gLastEthernetLinkPollMs) < kEthernetLinkPollMs) {
+    return gLastEthernetLinkStatus;
+  }
+  gLastEthernetLinkPollMs = now;
+
+  const EthernetLinkStatus currentStatus = Ethernet.linkStatus();
+  if (!forceReport && currentStatus == gLastEthernetLinkStatus) {
+    return currentStatus;
+  }
+
+  const EthernetLinkStatus previousStatus = gLastEthernetLinkStatus;
+  gLastEthernetLinkStatus = currentStatus;
+  if (currentStatus == LinkON) {
+    Serial.println("Ethernet cable connected.");
+  } else if (currentStatus == LinkOFF) {
+    Serial.println("WARNING: Ethernet cable disconnected.");
+    if (previousStatus != LinkOFF) {
+      gAtem.resetConnection();
+    }
+  } else {
+    Serial.println("Ethernet cable status unknown.");
+  }
+  return currentStatus;
+}
+
+void atemNetworkTask(void*) {
+  for (;;) {
+    if (pollEthernetLinkStatus() == LinkON) {
+      gAtem.update();
+    }
+    vTaskDelay(pdMS_TO_TICKS(kAtemTaskDelayMs));
+  }
+}
+
+void startAtemNetworkTask() {
+  if (gAtemTaskHandle != nullptr) return;
+
+  BaseType_t result = xTaskCreatePinnedToCore(
+      atemNetworkTask,
+      "atem-network",
+      kAtemTaskStackWords,
+      nullptr,
+      kAtemTaskPriority,
+      &gAtemTaskHandle,
+      0);
+
+  if (result == pdPASS) {
+    Serial.println("ATEM network task started on core 0.");
+  } else {
+    Serial.println("ERROR: Failed to start ATEM network task.");
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -858,6 +784,9 @@ void setup() {
 
   setupTlc();
   setupMatrix();
+  if (gMatrixReady) {
+    primeMatrixState();
+  }
   printHeader();
 
   // Reset W5500 SPI Ethernet
@@ -867,30 +796,39 @@ void setup() {
   digitalWrite(kEthRstPin, HIGH);
   delay(100);
 
-  // Initialize Ethernet SPI
-  SPI.begin(kEthSclkPin, kEthMisoPin, kEthMosiPin, kEthCsPin);
+  // Initialize Ethernet SPI - Pass -1 for hardware SS to avoid conflicting with manual CS pin 14
+  SPI.begin(kEthSclkPin, kEthMisoPin, kEthMosiPin, -1);
   Ethernet.init(kEthCsPin);
 
   // Initialize static Ethernet config
-  // Ethernet.begin(mac, ip, dns, gateway, subnet)
   uint8_t mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
   Ethernet.begin(mac, kLocalIp, kGateway, kGateway, kSubnet);
   
-  if (Ethernet.linkStatus() == LinkOFF) {
-    Serial.println("WARNING: Ethernet cable is disconnected!");
-  } else {
-    Serial.println("Ethernet Link Connected.");
-  }
+  // Print diagnostic network configuration
+  Serial.print("Ethernet IP:      ");
+  Serial.println(Ethernet.localIP());
+  Serial.print("Ethernet Subnet:  ");
+  Serial.println(Ethernet.subnetMask());
+  Serial.print("Ethernet Gateway: ");
+  Serial.println(Ethernet.gatewayIP());
+
+  pollEthernetLinkStatus(true);
+
+  // Configure W5500 to fail fast on ARP/transmission timeouts (avoid freezing main loop)
+  W5100.setRetransmissionTime(400); // 40ms retransmission timeout
+  W5100.setRetransmissionCount(3);  // 3 retries (total 120ms)
 
   // Open UDP listener on client port
-  gUdp.begin(kLocalPort);
+  if (gAtem.begin()) {
+    Serial.printf("UDP Listener opened on local port %u\r\n", kLocalPort);
+  } else {
+    Serial.printf("ERROR: Failed to open UDP port %u\r\n", kLocalPort);
+  }
 
-  // Establish handshake
-  connectToAtem();
+  startAtemNetworkTask();
 }
 
 void loop() {
-  updateAtemConnection();
   updateMatrixScanner();
   updateLeds();
 }

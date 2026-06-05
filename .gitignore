@@ -7,3 +7,4 @@
 include/README
 src/keymatrix_tlc5955_lauflicht.cpp
 src/keymatrix_mcp23017_tlc5955.cpp
+lib_ext

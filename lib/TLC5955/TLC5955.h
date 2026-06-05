@@ -64,7 +64,7 @@ class TLC5955
 public:
 
 /* Initialization */
-void init(uint8_t gslat, uint8_t spi_mosi, uint8_t spi_clk, uint8_t gsclk);
+void init(uint8_t gslat, uint8_t spi_mosi, uint8_t spi_clk, uint8_t gsclk, SPIClass* spi_bus = &SPI, int8_t spi_miso = -1);
 void deallocate();
 
 /* Setting individual LED intensities */
@@ -129,6 +129,8 @@ private:
   uint8_t _spi_mosi;
   uint8_t _spi_clk;
   uint8_t _gsclk;
+  SPIClass* _spi = nullptr;
+  int8_t _spi_miso = -1;
 #if defined(ARDUINO_ARCH_ESP32)
   uint8_t _gsclk_ledc_channel = 0;
 #endif

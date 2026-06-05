@@ -29,20 +29,22 @@
 
 #include "TLC5955.h"
 
-void TLC5955::init(uint8_t gslat, uint8_t spi_mosi, uint8_t spi_clk, uint8_t gsclk)
+void TLC5955::init(uint8_t gslat, uint8_t spi_mosi, uint8_t spi_clk, uint8_t gsclk, SPIClass* spi_bus, int8_t spi_miso)
 {
 
   _gslat = gslat;
   _spi_clk = spi_clk;
   _spi_mosi = spi_mosi;
   _gsclk = gsclk;
+  _spi = spi_bus;
+  _spi_miso = spi_miso;
 
   // Initialize SPI library.
 #if defined(ARDUINO_ARCH_ESP32)
-  SPI.begin(_spi_clk, -1, _spi_mosi, -1);
+  _spi->begin(_spi_clk, _spi_miso, _spi_mosi, -1);
 #else
-  SPI.setMOSI(_spi_mosi);
-  SPI.begin();
+  _spi->setMOSI(_spi_mosi);
+  _spi->begin();
 #endif
 
   // Set up latch
@@ -154,10 +156,10 @@ void TLC5955::print_byte(byte my_byte)
 void TLC5955::flush_buffer()
 {
   set_control_mode_bit(CONTROL_MODE_OFF);
-  SPI.beginTransaction(mSettings);
+  _spi->beginTransaction(mSettings);
   for (int16_t fCount = 0; fCount < chip_count * TOTAL_REGISTER_SIZE / 8; fCount++)
-    SPI.transfer(0);
-  SPI.endTransaction();
+    _spi->transfer(0);
+  _spi->endTransaction();
 }
 
 void TLC5955::set_control_mode_bit(bool is_control_mode)
@@ -166,7 +168,7 @@ void TLC5955::set_control_mode_bit(bool is_control_mode)
   digitalWrite(_gslat, LOW);
 
   // Turn off SPI Temporarily
-  SPI.end();
+  _spi->end();
 
   // Enable digital IO
   pinMode(_spi_mosi, OUTPUT);
@@ -193,9 +195,9 @@ void TLC5955::set_control_mode_bit(bool is_control_mode)
     digitalWrite(_spi_clk, LOW);
   }
 #if defined(ARDUINO_ARCH_ESP32)
-  SPI.begin(_spi_clk, -1, _spi_mosi, -1);
+  _spi->begin(_spi_clk, _spi_miso, _spi_mosi, -1);
 #else
-  SPI.begin();
+  _spi->begin();
 #endif
 }
 
@@ -230,7 +232,7 @@ void TLC5955::update()
   for (int16_t chip = (int8_t)chip_count - 1; chip >= 0; chip--)
   {
     set_control_mode_bit(CONTROL_MODE_OFF);
-    SPI.beginTransaction(mSettings);
+    _spi->beginTransaction(mSettings);
     uint8_t color_channel_ordered;
     for (int8_t led_channel_index = (int8_t)LEDS_PER_CHIP - 1; led_channel_index >= 0; led_channel_index--)
     {
@@ -238,11 +240,11 @@ void TLC5955::update()
       {
         color_channel_ordered = _rgb_order[chip][led_channel_index][(uint8_t) color_channel_index];
 
-        SPI.transfer((char)(_grayscale_data[chip][led_channel_index][color_channel_ordered] >> 8)); // Output MSB first
-        SPI.transfer((char)(_grayscale_data[chip][led_channel_index][color_channel_ordered] & 0xFF)); // Followed by LSB
+        _spi->transfer((char)(_grayscale_data[chip][led_channel_index][color_channel_ordered] >> 8)); // Output MSB first
+        _spi->transfer((char)(_grayscale_data[chip][led_channel_index][color_channel_ordered] & 0xFF)); // Followed by LSB
       }
     }
-    SPI.endTransaction();
+    _spi->endTransaction();
   }
 
   if (debug >= 2)
@@ -333,16 +335,16 @@ void TLC5955::clear_without_modifying_pattern()
   for (int16_t chip = (int8_t)chip_count - 1; chip >= 0; chip--)
   {
     set_control_mode_bit(CONTROL_MODE_OFF);
-    SPI.beginTransaction(mSettings);
+    _spi->beginTransaction(mSettings);
     for (int8_t led_channel_index = (int8_t)LEDS_PER_CHIP - 1; led_channel_index >= 0; led_channel_index--)
     {
       for (int8_t color_channel_index = (int8_t)COLOR_CHANNEL_COUNT - 1; color_channel_index >= 0; color_channel_index--)
       {
-        SPI.transfer((char)(0 >> 8)); // Output MSB first
-        SPI.transfer((char)(0 & 0xFF)); // Followed by LSB
+        _spi->transfer((char)(0 >> 8)); // Output MSB first
+        _spi->transfer((char)(0 & 0xFF)); // Followed by LSB
       }
     }
-    SPI.endTransaction();
+    _spi->endTransaction();
   }
 
   if (debug >= 2)
@@ -511,15 +513,15 @@ void TLC5955::set_buffer(uint8_t bit)
 {
   bitWrite(_buffer, _buffer_count, bit);
   _buffer_count--;
-  SPI.beginTransaction(mSettings);
+  _spi->beginTransaction(mSettings);
   if (_buffer_count == -1)
   {
     if (debug >= 2)
       print_byte(_buffer);
 
-    SPI.transfer(_buffer);
+    _spi->transfer(_buffer);
     _buffer_count = 7;
     _buffer = 0;
   }
-  SPI.endTransaction();
+  _spi->endTransaction();
 }
