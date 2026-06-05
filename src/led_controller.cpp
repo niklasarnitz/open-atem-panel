@@ -1,5 +1,6 @@
 #include "led_controller.h"
 #include "atem_client.h"
+#include "adc_reader.h"
 #include <TLC5955.h>
 #include <SPI.h>
 
@@ -15,10 +16,10 @@ uint16_t TLC5955::_grayscale_data[TLC5955::chip_count][TLC5955::LEDS_PER_CHIP][T
 namespace {
 
 // TLC5955 Pins (GPIO 33, 34, 36 are reserved for Octal PSRAM on ESP32-S3R8!)
-constexpr uint8_t kPinSin = 15;
-constexpr uint8_t kPinSclk = 16;
-constexpr uint8_t kPinLat = 17;
-constexpr uint8_t kPinGsclk = 2;
+constexpr uint8_t kPinSin = 15; // 29
+constexpr uint8_t kPinGsclk = 2; // 31
+constexpr uint8_t kPinSclk = 16; // 33
+constexpr uint8_t kPinLat = 17; // 35
 constexpr uint8_t kPinMiso = 4;
 constexpr uint32_t kGsclkFrequencyHz = 20000000;
 constexpr uint32_t kSpiFrequencyHz = 25000000;
@@ -89,8 +90,8 @@ const uint16_t kFaderLedChannels[] = {
 };
 const size_t kFaderLedCount = sizeof(kFaderLedChannels) / sizeof(kFaderLedChannels[0]);
 
-LedController::LedController(TLC5955& tlc, AtemClient& atem)
-    : tlc_(tlc), atem_(atem) {}
+LedController::LedController(TLC5955& tlc, AtemClient& atem, AdcReader& adc)
+    : tlc_(tlc), atem_(atem), adc_(adc) {}
 
 void LedController::begin(SPIClass* spi) {
   tlc_.init(kPinLat, kPinSin, kPinSclk, kPinGsclk, spi, kPinMiso);
@@ -301,28 +302,20 @@ void LedController::update(bool pgmShift, bool prvShift) {
 }
 
 void LedController::updateFaderLeds() {
-  const AtemSwitcherState& atem = atem_.state();
-  
-  uint32_t progress = 0;
-  if (atem.faderStartPosition == kAtemTransitionPositionMax) {
-    if (atem.faderLedPosition <= kAtemTransitionPositionMax) {
-      progress = kAtemTransitionPositionMax - atem.faderLedPosition;
-    }
-  } else {
-    progress = atem.faderLedPosition;
-  }
+  // Use physical fader position directly from ADC
+  // ADC 0 = fader at top (LED 1), ADC 4095 = fader at bottom (LED 16)
+  // LED index 0 = top, LED index 15 = bottom
+  uint16_t adcValue = adc_.channel(0);
 
-  uint8_t litCount = (progress * kFaderLedCount) / kAtemTransitionPositionMax;
-  if (litCount < 1) litCount = 1;
-  if (litCount > kFaderLedCount) litCount = kFaderLedCount;
+  // Map ADC [0, 4095] → LED count [1, 16]
+  // litCount represents how many LEDs are lit from the bottom
+  // At top (ADC 0): only LED 1 lit → litFromBottom = 0, litFromTop = 1
+  // At bottom (ADC 4095): all LEDs lit down to 16 → litFromBottom = 16
+  uint8_t faderLed = (uint8_t)(((uint32_t)adcValue * (kFaderLedCount - 1)) / 4095);
 
+  // faderLed is 0 at top, 15 at bottom — this is the index of the single lit LED
   for (size_t i = 0; i < kFaderLedCount; ++i) {
-    bool shouldLight = false;
-    if (atem.faderStartPosition == kAtemTransitionPositionMax) {
-      shouldLight = (i < litCount);
-    } else {
-      shouldLight = (i >= kFaderLedCount - litCount);
-    }
+    bool shouldLight = (i == faderLed);
     tlc_.set_single_channel(kFaderLedChannels[i], shouldLight ? kFaderLedBrightness : 0);
   }
 }

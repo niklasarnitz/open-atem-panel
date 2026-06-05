@@ -10,6 +10,7 @@
 #include "led_controller.h"
 #include "button_manager.h"
 #include "adc_reader.h"
+#include "fader_controller.h"
 
 namespace {
 
@@ -45,10 +46,11 @@ constexpr uint8_t kMcpAddress = 0x20;
 AtemClient gAtem(kSwitcherIp, kSwitcherPort, kLocalPort);
 TLC5955 gTlc;
 MCP23017 gMcp(kMcpAddress);
-
-LedController gLedController(gTlc, gAtem);
-ButtonManager gButtonManager(gMcp, gAtem);
 AdcReader gAdcReader(0x34);
+
+LedController gLedController(gTlc, gAtem, gAdcReader);
+ButtonManager gButtonManager(gMcp, gAtem);
+FaderController gFaderController(gAdcReader, gAtem, 0);
 
 namespace {
 
@@ -178,4 +180,5 @@ void loop() {
   gButtonManager.update();
   gLedController.update(gButtonManager.pgmShift(), gButtonManager.prvShift());
   gAdcReader.update();
+  gFaderController.update();
 }

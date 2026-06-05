@@ -83,7 +83,7 @@ void ButtonManager::begin() {
           detectedMcpAddr = addr;
         }
         Serial.print(" (MCP23017 Pin Expander)");
-      } else if (addr == 0x33) {
+      } else if (addr == 0x33 || addr == 0x34) {
         Serial.print(" (MAX11612 ADC)");
       }
       

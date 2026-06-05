@@ -1,9 +1,9 @@
 1 - 10 VCC LEDs
 11 
-12
-13 MAX11612 
+12 
+13  
 14 MAX11612 ADC VIN + VREF
-15
+15 
 16 ström für chips
 17
 18 GND
@@ -11,11 +11,11 @@
 20 GND
 21 GND
 22 GND
-23
+23 SCL
 24 GND
-25
+25 SCL
 26 GND
-27
+27 SDA
 28 GND
 
 LED Chips:
@@ -315,9 +315,3 @@ LED Assignments:
 23:49:36.841 > Name> dsk1 tie g
 23:49:39.553 > LED id=119 chip=2 led=7 color_channel=2
 23:49:39.554 > Name> dsk1 tie b
-
-
-
-
-
-

@@ -16,7 +16,7 @@ class AtemClient {
   bool sendCommand(const char* cmdName, const uint8_t* payload, uint8_t payloadLen);
 
   AtemConnectionState connectionState() const { return connectionState_; }
-  bool connected() const { return connectionState_ == AtemConnectionState::CONNECTED; }
+  bool connected() const { return connectionState_ == AtemConnectionState::CONNECTED && initialSyncComplete_; }
   const AtemSwitcherState& state() const { return switcherState_; }
   const AtemModelProfile& profile() const { return *profile_; }
   uint16_t sourceForButton(uint8_t buttonIndex, bool shifted) const;
@@ -59,7 +59,6 @@ class AtemClient {
   bool waitingForInitialDump_ = true;
   bool initialSyncComplete_ = false;
   bool initialStateSeen_ = false;
-  bool initialEmptyAckSent_ = false;
   bool initialSessionRecoveryUsed_ = false;
   bool markNextConnected_ = false;
   uint16_t initialSyncCommandCount_ = 0;

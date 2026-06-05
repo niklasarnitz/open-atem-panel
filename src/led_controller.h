@@ -6,6 +6,7 @@
 // Forward declarations
 class TLC5955;
 class AtemClient;
+class AdcReader;
 class SPIClass;
 
 // LED Brightness values
@@ -37,7 +38,7 @@ extern const size_t kFaderLedCount;
 
 class LedController {
  public:
-  LedController(TLC5955& tlc, AtemClient& atem);
+  LedController(TLC5955& tlc, AtemClient& atem, AdcReader& adc);
 
   void begin(SPIClass* spi);
   void update(bool pgmShift, bool prvShift);
@@ -50,4 +51,5 @@ class LedController {
 
   TLC5955& tlc_;
   AtemClient& atem_;
+  AdcReader& adc_;
 };

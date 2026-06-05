@@ -149,7 +149,7 @@ void AtemClient::sendAck(uint16_t remotePacketId, uint16_t remoteSequenceField) 
 }
 
 bool AtemClient::sendCommand(const char* cmdName, const uint8_t* payload, uint8_t payloadLen) {
-  if (connectionState_ != AtemConnectionState::CONNECTED) return false;
+  if (!connected()) return false;
   return enqueueCommand(cmdName, payload, payloadLen);
 }
 
@@ -300,7 +300,6 @@ void AtemClient::connect() {
   waitingForInitialDump_ = true;
   initialSyncComplete_ = false;
   initialStateSeen_ = false;
-  initialEmptyAckSent_ = false;
   initialSessionRecoveryUsed_ = false;
   markNextConnected_ = false;
   initialSyncCommandCount_ = 0;
@@ -341,7 +340,6 @@ void AtemClient::resetConnection() {
   waitingForInitialDump_ = true;
   initialSyncComplete_ = false;
   initialStateSeen_ = false;
-  initialEmptyAckSent_ = false;
   initialSessionRecoveryUsed_ = false;
   markNextConnected_ = false;
   resetReceivedRemotePackets();
@@ -404,7 +402,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
 
     if (strcmp(cmd, "_pin") == 0) {
       setProfileForProductIdentifier(data, dataLen);
-    } else if (strcmp(cmd, "PrgI") == 0) {
+    } else if (strcmp(cmd, "PrgI") == 0 && dataLen >= 4) {
       uint8_t me = data[0];
       uint16_t src = (data[2] << 8) | data[3];
       initialSyncSawProgram_ = true;
@@ -412,7 +410,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
         switcherState_.programSource = src;
         Serial.printf("STATE: Program Input -> %u\r\n", src);
       }
-    } else if (strcmp(cmd, "PrvI") == 0) {
+    } else if (strcmp(cmd, "PrvI") == 0 && dataLen >= 4) {
       uint8_t me = data[0];
       uint16_t src = (data[2] << 8) | data[3];
       initialSyncSawPreview_ = true;
@@ -420,7 +418,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
         switcherState_.previewSource = src;
         Serial.printf("STATE: Preview Input -> %u\r\n", src);
       }
-    } else if (strcmp(cmd, "DskS") == 0) {
+    } else if (strcmp(cmd, "DskS") == 0 && dataLen >= 3) {
       uint8_t idx = data[0];
       bool onAir = data[1] != 0;
       bool transitioning = data[2] != 0;
@@ -431,7 +429,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
           Serial.printf("STATE: DSK%d -> OnAir: %d, Trans: %d\r\n", idx + 1, onAir, transitioning);
         }
       }
-    } else if (strcmp(cmd, "DskP") == 0) {
+    } else if (strcmp(cmd, "DskP") == 0 && dataLen >= 2) {
       uint8_t idx = data[0];
       bool tie = data[1] != 0;
       if (idx < 2) {
@@ -440,7 +438,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
           Serial.printf("STATE: DSK%d Tie -> %d\r\n", idx + 1, tie);
         }
       }
-    } else if (strcmp(cmd, "KeOn") == 0) {
+    } else if (strcmp(cmd, "KeOn") == 0 && dataLen >= 3) {
       uint8_t me = data[0];
       uint8_t idx = data[1];
       bool onAir = data[2] != 0;
@@ -450,7 +448,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
           Serial.printf("STATE: KEY1 OnAir -> %d\r\n", onAir);
         }
       }
-    } else if (strcmp(cmd, "TrSS") == 0) {
+    } else if (strcmp(cmd, "TrSS") == 0 && dataLen >= 3) {
       uint8_t me = data[0];
       uint8_t nextTr = data[2];
       if (me == 0) {
@@ -462,7 +460,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
           Serial.printf("STATE: Next Transition -> BKGD: %d, KEY1: %d\r\n", bkgd, key1);
         }
       }
-    } else if (strcmp(cmd, "FtbS") == 0) {
+    } else if (strcmp(cmd, "FtbS") == 0 && dataLen >= 3) {
       uint8_t me = data[0];
       bool ftbDone = data[1] != 0;
       bool ftbActive = data[2] != 0;
@@ -473,7 +471,7 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
           Serial.printf("STATE: FTB -> Done: %d, Active: %d\r\n", ftbDone, ftbActive);
         }
       }
-    } else if (strcmp(cmd, "TrPs") == 0) {
+    } else if (strcmp(cmd, "TrPs") == 0 && dataLen >= 6) {
       uint8_t me = data[0];
       bool inProgress = data[1] != 0;
       uint16_t position = (data[4] << 8) | data[5];
@@ -668,22 +666,7 @@ void AtemClient::update() {
       }
 
       if (flags & kAtemFlagReliable) {
-        if (packetSize == 12 && !initialEmptyAckSent_) {
-          sendAck(remotePacketId, 0x0061);
-          initialEmptyAckSent_ = true;
-          if (!initialSyncComplete_) {
-            initialSyncComplete_ = true;
-            initialStateSeen_ = true;
-            markNextConnected_ = true;
-            Serial.println("ATEM: Initial state dump complete.");
-            Serial.printf("ATEM: Initial summary - Program: %u, Preview: %u, Commands: %u\r\n",
-                          switcherState_.programSource,
-                          switcherState_.previewSource,
-                          initialSyncCommandCount_);
-          }
-        } else {
-          sendAck(remotePacketId);
-        }
+        sendAck(remotePacketId);
         if (waitingForInitialDump_) {
           waitingForInitialDump_ = false;
           Serial.println("ATEM: Control channel ready. Synchronizing initial state...");
