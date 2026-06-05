@@ -3,59 +3,7 @@
 #include <Arduino.h>
 #include <Ethernet.h>
 
-constexpr uint16_t kUnknownAtemSource = 0xFFFF;
-constexpr uint16_t kAtemTransitionPositionMax = 10000;
-constexpr size_t kAtemPanelSourceButtonCount = 8;
-constexpr size_t kAtemCommandPayloadMax = 32;
-constexpr size_t kAtemCommandQueueSize = 16;
-
-enum class AtemModelProfileId : uint8_t {
-  Unknown,
-  MiniPro,
-  ConstellationHD1ME,
-};
-
-struct AtemModelProfile {
-  AtemModelProfileId id;
-  const char* name;
-  uint8_t mixEffects;
-  uint8_t upstreamKeyers;
-  uint8_t downstreamKeyers;
-  uint16_t primarySources[kAtemPanelSourceButtonCount];
-  uint16_t shiftedSources[kAtemPanelSourceButtonCount];
-};
-
-enum class AtemConnectionState : uint8_t {
-  DISCONNECTED,
-  CONNECTING,
-  CONNECTED,
-};
-
-struct AtemSwitcherState {
-  uint16_t programSource = kUnknownAtemSource;
-  uint16_t previewSource = kUnknownAtemSource;
-  bool key1OnAir = false;
-  bool nextTrBkgd = false;
-  bool nextTrKey1 = false;
-  bool dskOnAir[2] = {false, false};
-  bool dskTie[2] = {false, false};
-  bool dskTransitioning[2] = {false, false};
-  bool ftbActive = false;
-  bool ftbDone = false;
-  bool transitionInProgress = false;
-  uint16_t transitionPosition = 0;
-  uint16_t faderStartPosition = kAtemTransitionPositionMax;
-  uint16_t faderLedPosition = kAtemTransitionPositionMax;
-  bool virtualFaderAtTop = true;
-  bool transitionStartedAtTop = true;
-  bool faderTransitionActive = false;
-};
-
-struct QueuedAtemCommand {
-  char name[4];
-  uint8_t payload[kAtemCommandPayloadMax];
-  uint8_t payloadLen;
-};
+#include "atem_types.h"
 
 class AtemClient {
  public:

@@ -23,8 +23,8 @@ const AtemModelProfile kUnknownProfile = {
     1,
     1,
     1,
-    {1, 2, 3, 4, 5, 6, 7, 8},
-    {9, 10, 3010, 3020, 2001, 2002, 10010, 0},
+    {AtemSource::Input1, AtemSource::Input2, AtemSource::Input3, AtemSource::Input4, AtemSource::Input5, AtemSource::Input6, AtemSource::Input7, AtemSource::Input8},
+    {AtemSource::Input9, AtemSource::Input10, AtemSource::MediaPlayer1, AtemSource::MediaPlayer2, AtemSource::ColorGenerator1, AtemSource::ColorGenerator2, AtemSource::Program, AtemSource::Black},
 };
 
 const AtemModelProfile kMiniProProfile = {
@@ -33,8 +33,8 @@ const AtemModelProfile kMiniProProfile = {
     1,
     1,
     1,
-    {1, 2, 3, 4, 3010, 3020, 10010, 0},
-    {1, 2, 3, 4, 2001, 2002, 10010, 0},
+    {AtemSource::Input1, AtemSource::Input2, AtemSource::Input3, AtemSource::Input4, AtemSource::None, AtemSource::None, AtemSource::None, AtemSource::Black},
+    {AtemSource::Input1, AtemSource::Input2, AtemSource::Input3, AtemSource::Input4, AtemSource::None, AtemSource::None, AtemSource::None, AtemSource::Black},
 };
 
 const AtemModelProfile kConstellationHD1MEProfile = {
@@ -43,8 +43,8 @@ const AtemModelProfile kConstellationHD1MEProfile = {
     1,
     4,
     1,
-    {1, 2, 3, 4, 5, 6, 7, 8},
-    {9, 10, 3010, 3020, 2001, 2002, 10010, 0},
+    {AtemSource::Input1, AtemSource::Input2, AtemSource::Input3, AtemSource::Input4, AtemSource::Input5, AtemSource::Input6, AtemSource::Input7, AtemSource::Input8},
+    {AtemSource::Input9, AtemSource::Input10, AtemSource::MediaPlayer1, AtemSource::MediaPlayer2, AtemSource::ColorGenerator1, AtemSource::ColorGenerator2, AtemSource::Black, AtemSource::ColorBars},
 };
 
 bool containsIgnoreCase(const char* haystack, const char* needle) {
@@ -69,7 +69,7 @@ AtemClient::AtemClient(IPAddress switcherIp, uint16_t switcherPort, uint16_t loc
 
 uint16_t AtemClient::sourceForButton(uint8_t buttonIndex, bool shifted) const {
   if (buttonIndex >= kAtemPanelSourceButtonCount) return kUnknownAtemSource;
-  return shifted ? profile_->shiftedSources[buttonIndex] : profile_->primarySources[buttonIndex];
+  return static_cast<uint16_t>(shifted ? profile_->shiftedSources[buttonIndex] : profile_->primarySources[buttonIndex]);
 }
 
 bool AtemClient::supportsDownstreamKeyer(uint8_t keyerIndex) const {

@@ -1,0 +1,323 @@
+1 - 10 VCC LEDs
+11 
+12
+13 MAX11612 
+14 MAX11612 ADC VIN + VREF
+15
+16 ström für chips
+17
+18 GND
+19 GND
+20 GND
+21 GND
+22 GND
+23
+24 GND
+25
+26 GND
+27
+28 GND
+
+LED Chips:
+29: SIN LED Chips
+31: GSCLK LED Chips
+32: GND
+33: SCLK LED Chips
+34: GND
+35: LAT LED Chips
+
+36  GND
+
+Colums
+37 Shift
+38 8
+39 7 & FTB
+40 6 DSK TIE (both question)
+41 5 DSK CUT
+42 4 DSK AUTO
+43 3 BKGD, KEY TIE (question)
+44 2 KEY1 CUT
+45 1 CUT, AUTO
+
+46: GND
+
+Rows
+47 Key1 cut, Auto, FTB, DSK transitions (CUT/AUTO)a
+48 CUT, BKGD, Key1 TIE, DSK TIE
+49 PRV_1-8 + Shift
+50 PGM_1-8 + Shift
+
+
+
+
+Row:col
+50:45 PGM1
+50:44 PGM2
+50:43 PGM3
+50:42 PGM4
+50:41 PGM5
+50:40 PGM6
+50:39 PGM7
+50:38 PGM8
+50:37 PGM Shift
+
+49:45 Preview 1
+49:44 Preview 2
+49:43 Preview 3
+49:42 Preview 4
+49:41 Preview 5
+49:40 Preview 6
+49:39 Preview 7
+49:38 Preview 8
+49:37 PGM Shift
+
+48:45 CUT
+47:45 AUTO
+47:44 KEY1 CUT
+47:43 KEY1 TIE
+48:43 BKGD
+48:42 DSK1 AUTO
+47:42 DSK2 AUTO
+48:41 DSK1 CUT
+47:41 DSK2 CUT
+47:39 FTB
+48:40 DSK1 TIE
+47:40 DSK2 TIE
+
+
+
+
+
+
+
+
+LED Assignments:
+23:39:33.065 > LED id=0 chip=0 led=0 color_channel=0
+23:39:33.069 > Name> pgm2 rot
+23:39:37.760 > LED id=1 chip=0 led=0 color_channel=1
+23:39:37.762 > Name> pgm2 grn
+23:39:41.297 > LED id=2 chip=0 led=0 color_channel=2
+23:39:41.299 > Name> pgm2 blu
+23:39:43.638 > LED id=3 chip=0 led=1 color_channel=0
+23:39:43.640 > Name> prv1 red
+23:39:49.058 > LED id=4 chip=0 led=1 color_channel=1
+23:39:49.060 > Name> prv1 grn  
+23:39:54.729 > LED id=5 chip=0 led=1 color_channel=2
+23:39:54.730 > Name> prv1 blu
+23:39:57.772 > LED id=6 chip=0 led=2 color_channel=0
+23:39:57.774 > Name> prv2 rd
+23:40:03.155 > LED id=7 chip=0 led=2 color_channel=1
+23:40:03.157 > Name> prv2 g
+23:40:08.534 > LED id=8 chip=0 led=2 color_channel=2
+23:40:08.535 > Name> prv2 b 
+23:40:12.580 > LED id=9 chip=0 led=3 color_channel=0
+23:40:12.581 > Name> prv4 r
+23:40:18.446 > LED id=10 chip=0 led=3 color_channel=1
+23:40:18.448 > Name> prv4 g
+23:40:22.465 > LED id=11 chip=0 led=3 color_channel=2
+23:40:22.467 > Name> prv4 b
+23:40:26.028 > LED id=12 chip=0 led=4 color_channel=0
+23:40:26.030 > Name> pgm3 r
+23:40:34.391 > LED id=13 chip=0 led=4 color_channel=1
+23:40:34.393 > Name> pgm3 g
+23:40:36.877 > LED id=14 chip=0 led=4 color_channel=2
+23:40:36.878 > Name> pgm3 b
+23:40:39.512 > LED id=15 chip=0 led=5 color_channel=0
+23:40:39.514 > Name> pgm1 r
+23:40:42.887 > LED id=16 chip=0 led=5 color_channel=1
+23:40:42.889 > Name> pgm1 g
+23:40:45.088 > LED id=17 chip=0 led=5 color_channel=2
+23:40:45.089 > Name> pgm1 b
+23:41:08.074 > LED id=18 chip=0 led=6 color_channel=0
+23:41:08.076 > Name> prv3 r
+23:41:12.534 > LED id=19 chip=0 led=6 color_channel=1
+23:41:12.536 > Name> prv3 g
+23:41:14.527 > LED id=20 chip=0 led=6 color_channel=2
+23:41:14.528 > Name> prv3 b
+23:41:17.393 > LED id=21 chip=0 led=7 color_channel=0
+23:41:17.394 > Name> prv5 r
+23:41:21.820 > LED id=22 chip=0 led=7 color_channel=1
+23:41:21.821 > Name> prv5 g
+23:41:24.078 > LED id=23 chip=0 led=7 color_channel=2
+23:41:24.079 > Name> prv5 b
+23:41:26.721 > LED id=24 chip=0 led=8 color_channel=0
+23:41:26.723 > Name> pgm4 r
+23:41:30.441 > LED id=25 chip=0 led=8 color_channel=1
+23:41:30.442 > Name> pgm4 g
+23:41:33.051 > LED id=26 chip=0 led=8 color_channel=2
+23:41:33.052 > Name> pgm4 b
+23:41:39.922 > Name> pgm6 r
+23:41:59.512 > LED id=28 chip=0 led=9 color_channel=1
+23:41:59.513 > Name> pgm6 g
+23:42:02.434 > LED id=29 chip=0 led=9 color_channel=2
+23:42:02.436 > Name> pgm6 b
+23:42:05.629 > LED id=30 chip=0 led=10 color_channel=0
+23:42:05.630 > Name> prv8 r
+23:42:11.283 > LED id=31 chip=0 led=10 color_channel=1
+23:42:11.284 > Name> prv8 g
+23:42:13.841 > LED id=32 chip=0 led=10 color_channel=2
+23:42:13.843 > Name> prv8 b
+23:42:16.025 > LED id=33 chip=0 led=11 color_channel=0
+23:42:16.026 > Name> prv6 r
+23:42:19.424 > LED id=34 chip=0 led=11 color_channel=1
+23:42:19.426 > Name> prv6 g
+23:42:21.776 > LED id=35 chip=0 led=11 color_channel=2
+23:42:21.778 > Name> prv6 b
+23:42:25.294 > LED id=36 chip=0 led=12 color_channel=0
+23:42:25.296 > Name> pgm5 r
+23:42:43.680 > LED id=37 chip=0 led=12 color_channel=1
+23:42:43.682 > Name> pgm5 g
+23:42:45.358 > LED id=38 chip=0 led=12 color_channel=2
+23:42:45.359 > Name> pgm5 b
+23:42:48.415 > LED id=39 chip=0 led=13 color_channel=0
+23:42:48.416 > Name> pgm7 r
+23:42:51.322 > LED id=40 chip=0 led=13 color_channel=1
+23:42:51.323 > Name> pgm7 g
+23:42:54.266 > LED id=41 chip=0 led=13 color_channel=2
+23:42:54.268 > Name> pgm7 b
+23:42:56.431 > LED id=42 chip=0 led=14 color_channel=0
+23:42:56.433 > Name> pgm8 r
+23:42:59.195 > LED id=43 chip=0 led=14 color_channel=1
+23:42:59.197 > Name> pgm8 g
+23:43:02.396 > LED id=44 chip=0 led=14 color_channel=2
+23:43:02.398 > Name> pgm8 b
+23:43:05.980 > LED id=45 chip=0 led=15 color_channel=0
+23:43:05.982 > Name> pgm7 r
+23:43:10.024 > LED id=46 chip=0 led=15 color_channel=1
+23:43:10.026 > Name> pgm7 g
+23:43:12.681 > LED id=47 chip=0 led=15 color_channel=2
+23:43:12.683 > Name> pgm7 b
+23:43:15.504 > LED id=48 chip=1 led=0 color_channel=0
+23:42:56.433 > Name> pgm8 r
+23:42:59.195 > LED id=43 chip=0 led=14 color_channel=1
+23:42:59.197 > Name> pgm8 g
+23:43:02.396 > LED id=44 chip=0 led=14 color_channel=2
+23:43:02.398 > Name> pgm8 b
+23:43:05.980 > LED id=45 chip=0 led=15 color_channel=0
+23:43:05.982 > Name> pgm7 r
+23:43:10.024 > LED id=46 chip=0 led=15 color_channel=1
+23:43:10.026 > Name> pgm7 g
+23:43:12.681 > LED id=47 chip=0 led=15 color_channel=2
+23:43:12.683 > Name> pgm7 b
+23:43:15.504 > LED id=48 chip=1 led=0 color_channel=0
+23:43:15.505 > Name> BKGD r
+23:43:37.141 > LED id=49 chip=1 led=0 color_channel=1
+23:43:37.142 > Name> BKGD g
+23:43:39.578 > LED id=50 chip=1 led=0 color_channel=2
+23:43:39.579 > Name> BKGD b
+23:43:42.185 > LED id=51 chip=1 led=1 color_channel=0
+23:43:42.186 > Name> prv shift r
+23:43:50.227 > LED id=52 chip=1 led=1 color_channel=1
+23:43:50.229 > Name> prv shift g
+23:43:52.973 > LED id=53 chip=1 led=1 color_channel=2
+23:43:52.975 > Name> prv shift b
+23:44:02.999 > LED id=54 chip=1 led=2 color_channel=0
+23:44:03.001 > Name> cut r
+23:44:06.628 > LED id=55 chip=1 led=2 color_channel=1
+23:44:06.629 > Name> cut g
+23:44:08.073 > LED id=56 chip=1 led=2 color_channel=2
+23:44:08.076 > Name> cut b
+23:44:32.449 > LED id=60 chip=1 led=4 color_channel=0
+23:44:32.451 > Name> key1 tie r
+23:44:38.416 > LED id=61 chip=1 led=4 color_channel=1
+23:44:38.418 > Name> key1 tie g
+23:44:40.559 > LED id=62 chip=1 led=4 color_channel=2
+23:44:40.560 > Name> key1 tie b
+23:44:42.836 > LED id=63 chip=1 led=5 color_channel=0
+23:44:42.837 > Name> pgm shift r
+23:44:47.690 > LED id=64 chip=1 led=5 color_channel=1
+23:44:47.692 > Name> pgm shift g
+23:44:51.056 > LED id=65 chip=1 led=5 color_channel=2
+23:44:51.058 > Name> pgm shift b
+23:45:15.468 > LED id=72 chip=1 led=8 color_channel=0
+23:45:15.471 > Name> fader indikator 2
+23:45:31.977 > LED id=73 chip=1 led=8 color_channel=1
+23:45:31.979 > Name> fader ind 3
+23:45:36.446 > LED id=74 chip=1 led=8 color_channel=2
+23:45:36.448 > Name> fader ind 1
+23:45:38.275 > LED id=75 chip=1 led=9 color_channel=0
+23:45:38.276 > Name> key 1 cut r
+23:45:46.285 > LED id=76 chip=1 led=9 color_channel=1
+23:45:46.286 > Name> key 1 cut g
+23:45:49.015 > LED id=77 chip=1 led=9 color_channel=2
+23:45:49.017 > Name> key 1 cut b
+23:45:54.057 > LED id=78 chip=1 led=10 color_channel=0
+23:45:54.058 > Name> fader indicator 14
+23:46:11.748 > LED id=79 chip=1 led=10 color_channel=1
+23:46:11.750 > Name> fader indicator 15
+23:46:18.266 > LED id=80 chip=1 led=10 color_channel=2
+23:46:18.268 > Name> fader indicator 13
+23:46:22.419 > LED id=81 chip=1 led=11 color_channel=0
+23:46:22.421 > Name> auto r
+23:46:25.092 > LED id=82 chip=1 led=11 color_channel=1
+23:46:25.094 > Name> auto g
+23:46:26.818 > LED id=83 chip=1 led=11 color_channel=2
+23:46:26.820 > Name> auto b
+23:46:29.260 > LED id=84 chip=1 led=12 color_channel=0
+23:46:29.262 > Name> fader indicator 5
+23:46:58.169 > LED id=85 chip=1 led=12 color_channel=1
+23:46:58.170 > Name> fader indicator 6
+23:47:00.952 > LED id=86 chip=1 led=12 color_channel=2
+23:47:00.953 > Name> fader indicator 4
+23:47:02.780 > LED id=87 chip=1 led=13 color_channel=0
+23:47:02.782 > Name> fader indicator 8
+23:47:07.027 > LED id=88 chip=1 led=13 color_channel=1
+23:47:07.029 > Name> fader indicator 9
+23:47:09.402 > LED id=89 chip=1 led=13 color_channel=2
+23:47:09.403 > Name> fader indicator 7
+23:47:11.605 > LED id=90 chip=1 led=14 color_channel=0
+23:47:11.606 > Name> fader indicator 11
+23:47:17.880 > LED id=91 chip=1 led=14 color_channel=1
+23:47:17.882 > Name> fader indicator 12
+23:47:20.225 > LED id=92 chip=1 led=14 color_channel=2
+23:47:20.226 > Name> fader indicator 10
+23:47:43.863 > LED id=95 chip=1 led=15 color_channel=2
+23:47:43.864 > Name> fader indicator 16
+23:47:54.128 > LED id=96 chip=2 led=0 color_channel=0
+23:47:54.130 > Name> dsk1 cut r
+23:47:59.165 > LED id=97 chip=2 led=0 color_channel=1
+23:47:59.168 > Name> dks1 cut g
+23:48:01.630 > LED id=98 chip=2 led=0 color_channel=2
+23:48:01.631 > Name> dsk1 cut b
+23:48:05.730 > LED id=99 chip=2 led=1 color_channel=0
+23:48:05.732 > Name> dsk2 cut r
+23:48:10.396 > LED id=100 chip=2 led=1 color_channel=1
+23:48:10.398 > Name> dsk2 cut g
+23:48:13.162 > LED id=101 chip=2 led=1 color_channel=2
+23:48:13.164 > Name> dsk2 cut b
+23:48:16.046 > LED id=102 chip=2 led=2 color_channel=0
+23:48:16.047 > Name> dsk2 auto r
+23:48:28.502 > LED id=103 chip=2 led=2 color_channel=1
+23:48:28.503 > Name> dsk2 auto g
+23:48:31.544 > LED id=104 chip=2 led=2 color_channel=2
+23:48:31.546 > Name> dsk2 auto b
+23:48:35.690 > LED id=105 chip=2 led=3 color_channel=0
+23:48:35.691 > Name> dsk2 tie r
+23:48:38.671 > LED id=106 chip=2 led=3 color_channel=1
+23:48:38.673 > Name> dsk2 tie g
+23:48:58.084 > LED id=107 chip=2 led=3 color_channel=2
+23:48:58.085 > Name> dsk2 tie b
+23:49:04.168 > LED id=111 chip=2 led=5 color_channel=0
+23:49:04.169 > Name> dsk1 auto r  
+23:49:21.243 > LED id=112 chip=2 led=5 color_channel=1
+23:49:21.245 > Name> dsk1 auto g
+23:49:24.269 > LED id=113 chip=2 led=5 color_channel=2
+23:49:24.271 > Name> dsk1 auto b
+23:49:27.077 > LED id=114 chip=2 led=6 color_channel=0
+23:49:27.078 > Name> ftb r
+23:49:29.912 > LED id=115 chip=2 led=6 color_channel=1
+23:49:29.914 > Name> ftb g
+23:49:31.395 > LED id=116 chip=2 led=6 color_channel=2
+23:49:31.396 > Name> ftb b
+23:49:33.204 > LED id=117 chip=2 led=7 color_channel=0
+23:49:33.206 > Name> dsk1 tie r
+23:49:36.839 > LED id=118 chip=2 led=7 color_channel=1
+23:49:36.841 > Name> dsk1 tie g
+23:49:39.553 > LED id=119 chip=2 led=7 color_channel=2
+23:49:39.554 > Name> dsk1 tie b
+
+
+
+
+
+
