@@ -9,6 +9,7 @@
 #include "atem_client.h"
 #include "led_controller.h"
 #include "button_manager.h"
+#include "adc_reader.h"
 
 namespace {
 
@@ -47,6 +48,7 @@ MCP23017 gMcp(kMcpAddress);
 
 LedController gLedController(gTlc, gAtem);
 ButtonManager gButtonManager(gMcp, gAtem);
+AdcReader gAdcReader(0x34);
 
 namespace {
 
@@ -129,6 +131,7 @@ void setup() {
   gLedController.begin(&gTlcSpi);
   gButtonManager.begin();
   gButtonManager.primeMatrixState();
+  gAdcReader.begin();
   
   printHeader();
 
@@ -174,4 +177,5 @@ void setup() {
 void loop() {
   gButtonManager.update();
   gLedController.update(gButtonManager.pgmShift(), gButtonManager.prvShift());
+  gAdcReader.update();
 }

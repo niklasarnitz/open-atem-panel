@@ -68,37 +68,44 @@ void ButtonManager::begin() {
   Wire.begin(kI2cSdaPin, kI2cSclPin);
   Wire.setClock(kI2cFrequencyHz);
 
-  // Auto-detect MCP23017 I2C Address (range 0x20 to 0x27)
-  uint8_t detectedAddr = 0;
-  for (uint8_t addr = 0x20; addr <= 0x27; ++addr) {
+  // Scan entire I2C bus (excluding address 0) to report all connected devices
+  Serial.println("I2C Scanner: Scanning bus...");
+  bool foundAny = false;
+  uint8_t detectedMcpAddr = 0;
+
+  for (uint8_t addr = 1; addr < 127; ++addr) {
     Wire.beginTransmission(addr);
     if (Wire.endTransmission() == 0) {
-      detectedAddr = addr;
-      break;
+      Serial.printf("  I2C device detected at address 0x%02X", addr);
+      
+      if (addr >= 0x20 && addr <= 0x27) {
+        if (detectedMcpAddr == 0) {
+          detectedMcpAddr = addr;
+        }
+        Serial.print(" (MCP23017 Pin Expander)");
+      } else if (addr == 0x33) {
+        Serial.print(" (MAX11612 ADC)");
+      }
+      
+      Serial.println();
+      foundAny = true;
     }
   }
 
-  if (detectedAddr == 0) {
-    Serial.println("ERROR: MCP23017 not found on I2C bus! Scanning entire bus...");
-    bool foundDevice = false;
-    for (uint8_t addr = 1; addr < 127; ++addr) {
-      Wire.beginTransmission(addr);
-      if (Wire.endTransmission() == 0) {
-        Serial.printf("  I2C device detected at address 0x%02X\r\n", addr);
-        foundDevice = true;
-      }
-    }
-    if (!foundDevice) {
-      Serial.println("  No I2C devices found at all. Check SDA/SCL lines and pull-up resistors.");
-    }
+  if (!foundAny) {
+    Serial.println("  No I2C devices found at all. Check SDA/SCL lines and pull-up resistors.");
+  }
+
+  if (detectedMcpAddr == 0) {
+    Serial.println("ERROR: MCP23017 not found on I2C bus!");
     return;
   }
 
-  Serial.printf("I2C: MCP23017 auto-detected at address 0x%02X\r\n", detectedAddr);
-  mcp_ = MCP23017(detectedAddr);
+  Serial.printf("I2C: MCP23017 auto-detected at address 0x%02X\r\n", detectedMcpAddr);
+  mcp_ = MCP23017(detectedMcpAddr);
 
   if (!mcp_.begin(false)) {
-    Serial.printf("ERROR: Failed to initialize MCP23017 at address 0x%02X\r\n", detectedAddr);
+    Serial.printf("ERROR: Failed to initialize MCP23017 at address 0x%02X\r\n", detectedMcpAddr);
     return;
   }
 
