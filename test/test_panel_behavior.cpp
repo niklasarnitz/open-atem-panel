@@ -8,6 +8,7 @@
 #include "atem_client.h"
 #include "led_controller.h"
 #include "adc_reader.h"
+#include "fader_controller.h"
 #include "button_manager.h"
 #include "MCP23017.h"
 
@@ -70,6 +71,10 @@ void get_led_colors(LedId id, uint16_t& r, uint16_t& g, uint16_t& b) {
   r = TLC5955::_grayscale_data[led->redChannel / 48][(led->redChannel % 48) / 3][led->redChannel % 3];
   g = TLC5955::_grayscale_data[led->greenChannel / 48][(led->greenChannel % 48) / 3][led->greenChannel % 3];
   b = TLC5955::_grayscale_data[led->blueChannel / 48][(led->blueChannel % 48) / 3][led->blueChannel % 3];
+}
+
+uint16_t get_fader_led_value(size_t index) {
+  return TLC5955::_grayscale_data[kFaderLedChannels[index]/48][(kFaderLedChannels[index]%48)/3][kFaderLedChannels[index]%3];
 }
 
 size_t append_atem_command(uint8_t* packet, size_t offset, const char* name, const uint8_t* payload, uint16_t payloadLen) {
@@ -218,6 +223,41 @@ void test_parse_state_ignores_short_command_payloads(void) {
 
   TEST_ASSERT_EQUAL(kUnknownAtemSource, gAtem.switcherState_.programSource);
   TEST_ASSERT_TRUE(gAtem.connected());
+}
+
+void test_fader_sends_absolute_position_and_uses_atem_return(void) {
+  FaderController fader(gAdc, gAtem);
+
+  gAtem.connectionState_ = AtemConnectionState::CONNECTED;
+  gAtem.initialSyncComplete_ = true;
+  gAtem.switcherState_.virtualFaderAtTop = false;
+
+  TEST_ASSERT_EQUAL(0, fader.mapAdcToAtemPosition(0));
+  TEST_ASSERT_EQUAL(kAtemTransitionPositionMax, fader.mapAdcToAtemPosition(4095));
+
+  gAdc.channels_[0] = 4095;
+  fader.update();
+
+  TEST_ASSERT_EQUAL(1, gAtem.commandQueueCount_);
+  TEST_ASSERT_EQUAL_INT8('C', gAtem.commandQueue_[0].name[0]);
+  TEST_ASSERT_EQUAL_INT8('T', gAtem.commandQueue_[0].name[1]);
+  TEST_ASSERT_EQUAL_INT8('P', gAtem.commandQueue_[0].name[2]);
+  TEST_ASSERT_EQUAL_INT8('s', gAtem.commandQueue_[0].name[3]);
+  TEST_ASSERT_EQUAL(0x27, gAtem.commandQueue_[0].payload[2]);
+  TEST_ASSERT_EQUAL(0x10, gAtem.commandQueue_[0].payload[3]);
+
+  uint8_t packet[32] = {};
+  size_t offset = 12;
+  const uint8_t transitionPayload[6] = {0x00, 0x01, 0x00, 0x00, 0x13, 0x88};
+  offset = append_atem_command(packet, offset, "TrPs", transitionPayload, sizeof(transitionPayload));
+  finalize_atem_packet(packet, offset);
+
+  gAtem.parseState(packet, offset);
+
+  TEST_ASSERT_EQUAL(5000, gAtem.switcherState_.transitionPosition);
+  TEST_ASSERT_EQUAL(5000, gAtem.switcherState_.faderLedPosition);
+  TEST_ASSERT_TRUE(gAtem.switcherState_.transitionInProgress);
+  TEST_ASSERT_TRUE(gAtem.switcherState_.faderTransitionActive);
 }
 
 // Test 5: LED Color Logic (Program and Preview)
@@ -407,31 +447,65 @@ void test_fade_to_black_led(void) {
 
 // Test 8: Fader LED progress bar filling
 void test_fader_led_positions(void) {
-  // ADC 0: fader at top, only LED 1 lit
+  // Idle: ADC 0 shows the physical fader at the top endpoint.
   gAdc.channels_[0] = 0;
   gLedController.updateFaderLeds();
-  TEST_ASSERT_EQUAL(kFaderLedBrightness, TLC5955::_grayscale_data[kFaderLedChannels[0]/48][(kFaderLedChannels[0]%48)/3][kFaderLedChannels[0]%3]);
+  TEST_ASSERT_EQUAL(kFaderLedBrightness, get_fader_led_value(0));
   for (size_t i = 1; i < kFaderLedCount; ++i) {
-    TEST_ASSERT_EQUAL(0, TLC5955::_grayscale_data[kFaderLedChannels[i]/48][(kFaderLedChannels[i]%48)/3][kFaderLedChannels[i]%3]);
+    TEST_ASSERT_EQUAL(0, get_fader_led_value(i));
   }
 
-  // ADC midpoint maps to a single middle LED
+  // Active transition fills from LED 1 toward LED 16 using ATEM TrPs.
   gTlc.set_all(0);
-  gAdc.channels_[0] = 2048;
+  gAtem.switcherState_.transitionInProgress = true;
+  gAtem.switcherState_.faderTransitionActive = true;
+  gAtem.switcherState_.transitionStartedAtTop = true;
+  gAtem.switcherState_.faderLedPosition = 5000;
+  gAtem.switcherState_.transitionPosition = 5000;
   gLedController.updateFaderLeds();
   for (size_t i = 0; i < kFaderLedCount; ++i) {
-    uint16_t expected = (i == 7) ? kFaderLedBrightness : 0;
-    TEST_ASSERT_EQUAL(expected, TLC5955::_grayscale_data[kFaderLedChannels[i]/48][(kFaderLedChannels[i]%48)/3][kFaderLedChannels[i]%3]);
+    uint16_t expected = (i < 8) ? kFaderLedBrightness : 0;
+    TEST_ASSERT_EQUAL(expected, get_fader_led_value(i));
   }
 
-  // ADC 4095: fader at bottom, only LED 16 lit
+  // A larger TrPs value lights more sequential LEDs.
   gTlc.set_all(0);
-  gAdc.channels_[0] = 4095;
+  gAtem.switcherState_.faderLedPosition = 7500;
+  gAtem.switcherState_.transitionPosition = 7500;
   gLedController.updateFaderLeds();
-  for (size_t i = 0; i + 1 < kFaderLedCount; ++i) {
-    TEST_ASSERT_EQUAL(0, TLC5955::_grayscale_data[kFaderLedChannels[i]/48][(kFaderLedChannels[i]%48)/3][kFaderLedChannels[i]%3]);
+  for (size_t i = 0; i < kFaderLedCount; ++i) {
+    uint16_t expected = (i < 12) ? kFaderLedBrightness : 0;
+    TEST_ASSERT_EQUAL(expected, get_fader_led_value(i));
   }
-  TEST_ASSERT_EQUAL(kFaderLedBrightness, TLC5955::_grayscale_data[kFaderLedChannels[15]/48][(kFaderLedChannels[15]%48)/3][kFaderLedChannels[15]%3]);
+
+  // Moving the physical fader from ADC 4095 toward 0 starts from LED 16.
+  gTlc.set_all(0);
+  gAtem.switcherState_.transitionStartedAtTop = false;
+  gAtem.switcherState_.faderLedPosition = 5000;
+  gAtem.switcherState_.transitionPosition = 5000;
+  gLedController.updateFaderLeds();
+  for (size_t i = 0; i < kFaderLedCount; ++i) {
+    uint16_t expected = (i >= 8) ? kFaderLedBrightness : 0;
+    TEST_ASSERT_EQUAL(expected, get_fader_led_value(i));
+  }
+
+  gTlc.set_all(0);
+  gAtem.switcherState_.faderLedPosition = 7500;
+  gAtem.switcherState_.transitionPosition = 7500;
+  gLedController.updateFaderLeds();
+  for (size_t i = 0; i < kFaderLedCount; ++i) {
+    uint16_t expected = (i >= 4) ? kFaderLedBrightness : 0;
+    TEST_ASSERT_EQUAL(expected, get_fader_led_value(i));
+  }
+
+  // Full progress lights the whole bar.
+  gTlc.set_all(0);
+  gAtem.switcherState_.faderLedPosition = kAtemTransitionPositionMax;
+  gAtem.switcherState_.transitionPosition = kAtemTransitionPositionMax;
+  gLedController.updateFaderLeds();
+  for (size_t i = 0; i < kFaderLedCount; ++i) {
+    TEST_ASSERT_EQUAL(kFaderLedBrightness, get_fader_led_value(i));
+  }
 }
 
 
@@ -512,6 +586,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_profile_led_support);
   RUN_TEST(test_initial_sync_requires_incm_before_ready);
   RUN_TEST(test_parse_state_ignores_short_command_payloads);
+  RUN_TEST(test_fader_sends_absolute_position_and_uses_atem_return);
   RUN_TEST(test_led_color_logic_pgm_prv);
   RUN_TEST(test_transition_keyer_leds);
   RUN_TEST(test_fade_to_black_led);

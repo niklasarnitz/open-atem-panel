@@ -5,11 +5,8 @@ FaderController::FaderController(AdcReader& adc, AtemClient& atem, uint8_t adcCh
 
 uint16_t FaderController::mapAdcToAtemPosition(uint16_t adcValue) const {
   // ADC 0 = fader at top, ADC 4095 = fader at bottom
-  // ATEM CTPs: 0 = rest position, 10000 = transition complete
-  //
-  // The mapping direction depends on where the virtual fader currently rests:
-  //   virtualFaderAtTop=false (rest=bottom): moving up (4095→0) = transition 0→10000
-  //   virtualFaderAtTop=true  (rest=top):    moving down (0→4095) = transition 0→10000
+  // ATEM CTPs receives the absolute fader-bar position. The returned TrPs
+  // transitionPosition is then used as the source of truth for progress LEDs.
 
   // Apply deadzone at extremes for clean endpoints
   if (adcValue <= kDeadzoneAdc) {
@@ -30,15 +27,6 @@ uint16_t FaderController::mapAdcToAtemPosition(uint16_t adcValue) const {
     mapped = (uint16_t)((adjusted * kAtemPositionMax) / range);
   }
 
-  // Flip based on virtual fader state:
-  // When fader rests at bottom (virtualFaderAtTop=false):
-  //   ADC 4095 (bottom, rest) → ATEM 0, ADC 0 (top, end) → ATEM 10000
-  // When fader rests at top (virtualFaderAtTop=true):
-  //   ADC 0 (top, rest) → ATEM 0, ADC 4095 (bottom, end) → ATEM 10000
-  bool faderAtTop = atem_.state().virtualFaderAtTop;
-  if (!faderAtTop) {
-    return kAtemPositionMax - mapped;
-  }
   return mapped;
 }
 
@@ -63,9 +51,8 @@ void FaderController::update() {
         (uint8_t)(position & 0xFF),        // position low byte
     };
     atem_.sendCommand("CTPs", payload, sizeof(payload));
-    Serial.printf("FADER: Initial sync → ATEM position %u (ADC: %u, vFader: %s)\r\n",
-                  position, adcValue,
-                  atem_.state().virtualFaderAtTop ? "top" : "bottom");
+    Serial.printf("FADER: Initial sync -> ATEM absolute position %u (ADC: %u)\r\n",
+                  position, adcValue);
     return;
   }
 

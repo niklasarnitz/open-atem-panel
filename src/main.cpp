@@ -23,11 +23,11 @@ constexpr uint32_t kAtemTaskStackWords = 6144;
 constexpr UBaseType_t kAtemTaskPriority = 2;
 
 // Network configuration parameters
-const IPAddress kLocalIp(10, 0, 0, 142);
-const IPAddress kGateway(10, 0, 0, 254);
+const IPAddress kLocalIp(192, 168, 178, 142);
+const IPAddress kGateway(192, 168, 178, 254);
 const IPAddress kSubnet(255, 255, 255, 0);
 
-const IPAddress kSwitcherIp(10, 0, 0, 146);
+const IPAddress kSwitcherIp(192, 168, 178, 146);
 
 constexpr uint16_t kSwitcherPort = 9910;
 constexpr uint16_t kLocalPort = 50991;

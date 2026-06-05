@@ -302,20 +302,27 @@ void LedController::update(bool pgmShift, bool prvShift) {
 }
 
 void LedController::updateFaderLeds() {
-  // Use physical fader position directly from ADC
-  // ADC 0 = fader at top (LED 1), ADC 4095 = fader at bottom (LED 16)
-  // LED index 0 = top, LED index 15 = bottom
-  uint16_t adcValue = adc_.channel(0);
+  const AtemSwitcherState& atem = atem_.state();
 
-  // Map ADC [0, 4095] → LED count [1, 16]
-  // litCount represents how many LEDs are lit from the bottom
-  // At top (ADC 0): only LED 1 lit → litFromBottom = 0, litFromTop = 1
-  // At bottom (ADC 4095): all LEDs lit down to 16 → litFromBottom = 16
-  uint8_t faderLed = (uint8_t)(((uint32_t)adcValue * (kFaderLedCount - 1)) / 4095);
+  if (atem.transitionInProgress || atem.faderTransitionActive) {
+    const uint16_t position = atem.faderLedPosition > kAtemTransitionPositionMax
+                                  ? kAtemTransitionPositionMax
+                                  : atem.faderLedPosition;
+    const uint8_t litCount = 1 + (uint8_t)(((uint32_t)position * (kFaderLedCount - 1)) / kAtemTransitionPositionMax);
+    const size_t firstLitFromBottom = kFaderLedCount - litCount;
 
-  // faderLed is 0 at top, 15 at bottom — this is the index of the single lit LED
+    for (size_t i = 0; i < kFaderLedCount; ++i) {
+      const bool shouldLight = atem.transitionStartedAtTop ? (i < litCount) : (i >= firstLitFromBottom);
+      tlc_.set_single_channel(kFaderLedChannels[i], shouldLight ? kFaderLedBrightness : 0);
+    }
+    return;
+  }
+
+  const uint16_t adcValue = adc_.channel(0);
+  const uint8_t faderLed = (uint8_t)(((uint32_t)adcValue * (kFaderLedCount - 1)) / 4095);
+
   for (size_t i = 0; i < kFaderLedCount; ++i) {
-    bool shouldLight = (i == faderLed);
+    const bool shouldLight = (i == faderLed);
     tlc_.set_single_channel(kFaderLedChannels[i], shouldLight ? kFaderLedBrightness : 0);
   }
 }

@@ -36,7 +36,7 @@ class AtemClient {
   bool hasValidHeaderLength(const uint8_t* packet, uint16_t packetSize) const;
   void parseState(const uint8_t* packet, uint16_t packetLen);
   void setProfileForProductIdentifier(const uint8_t* data, uint16_t dataLen);
-  void updateVirtualFaderPosition(uint16_t transitionPosition);
+  void updateVirtualFaderPosition(uint16_t transitionPosition, bool inProgress);
 
   IPAddress switcherIp_;
   uint16_t switcherPort_;

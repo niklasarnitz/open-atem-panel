@@ -345,34 +345,25 @@ void AtemClient::resetConnection() {
   resetReceivedRemotePackets();
 }
 
-void AtemClient::updateVirtualFaderPosition(uint16_t transitionPosition) {
-  if (!switcherState_.faderTransitionActive) {
-    if (transitionPosition == 0 || transitionPosition == kAtemTransitionPositionMax) {
-      switcherState_.faderLedPosition = switcherState_.virtualFaderAtTop ? kAtemTransitionPositionMax : 0;
-      switcherState_.faderStartPosition = switcherState_.faderLedPosition;
-      switcherState_.transitionInProgress = false;
-      return;
-    }
+void AtemClient::updateVirtualFaderPosition(uint16_t transitionPosition, bool inProgress) {
+  const bool wasActive = switcherState_.transitionInProgress || switcherState_.faderTransitionActive;
 
-    switcherState_.faderTransitionActive = true;
-    switcherState_.transitionInProgress = true;
+  if (inProgress && !wasActive) {
     switcherState_.transitionStartedAtTop = switcherState_.virtualFaderAtTop;
-    switcherState_.faderStartPosition = switcherState_.virtualFaderAtTop ? kAtemTransitionPositionMax : 0;
+    switcherState_.faderStartPosition = switcherState_.virtualFaderAtTop ? 0 : kAtemTransitionPositionMax;
   }
 
-  if (transitionPosition == 0) {
-    switcherState_.faderTransitionActive = false;
-    switcherState_.transitionInProgress = false;
-    switcherState_.virtualFaderAtTop = !switcherState_.transitionStartedAtTop;
-    switcherState_.faderLedPosition = switcherState_.virtualFaderAtTop ? kAtemTransitionPositionMax : 0;
-    switcherState_.faderStartPosition = switcherState_.faderLedPosition;
-    return;
-  }
+  switcherState_.transitionInProgress = inProgress;
+  switcherState_.faderTransitionActive = inProgress ||
+                                         (transitionPosition > 0 && transitionPosition < kAtemTransitionPositionMax);
+  switcherState_.faderLedPosition = transitionPosition;
 
-  switcherState_.transitionInProgress = true;
-  switcherState_.faderLedPosition = switcherState_.transitionStartedAtTop
-                                        ? kAtemTransitionPositionMax - transitionPosition
-                                        : transitionPosition;
+  if (!switcherState_.faderTransitionActive &&
+      (transitionPosition == 0 || transitionPosition == kAtemTransitionPositionMax)) {
+    switcherState_.virtualFaderAtTop = transitionPosition == 0;
+    switcherState_.transitionStartedAtTop = switcherState_.virtualFaderAtTop;
+    switcherState_.faderStartPosition = transitionPosition;
+  }
 }
 
 void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
@@ -481,11 +472,10 @@ void AtemClient::parseState(const uint8_t* packet, uint16_t packetLen) {
       if (me == 0) {
         if (switcherState_.transitionInProgress != inProgress || switcherState_.transitionPosition != position) {
           switcherState_.transitionPosition = position;
-          updateVirtualFaderPosition(position);
-          Serial.printf("STATE: Transition -> InProgress: %d, Position: %u, Fader: %s, FaderActive: %d\r\n",
+          updateVirtualFaderPosition(position, inProgress);
+          Serial.printf("STATE: Transition -> InProgress: %d, Position: %u, FaderActive: %d\r\n",
                         inProgress,
                         position,
-                        switcherState_.virtualFaderAtTop ? "top" : "bottom",
                         switcherState_.faderTransitionActive);
         }
       }
